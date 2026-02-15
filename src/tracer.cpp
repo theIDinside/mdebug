@@ -335,15 +335,45 @@ Tracer::GetSessionTaskMap() noexcept
 }
 
 /** static */
-std::shared_ptr<SymbolFile>
-Tracer::LookupSymbolfile(const std::filesystem::path &path) noexcept
+void
+Tracer::CacheObjectFile(std::shared_ptr<ObjectFile> objectFile) noexcept
 {
-  for (const auto &t : Get().mTracedProcesses) {
-    if (std::shared_ptr<SymbolFile> sym = t->LookupSymbolFile(path); sym) {
-      return sym;
-    }
+  Get().mObjectFiles.emplace(objectFile->GetFilePath().string(), objectFile);
+}
+
+/* static */
+std::shared_ptr<ObjectFile>
+Tracer::LookupSymbolFile(std::string_view pathStr) noexcept
+{
+  auto &objectFiles = Get().mObjectFiles;
+  auto it = objectFiles.find(pathStr);
+  if (it != std::end(objectFiles)) {
+    return it->second;
   }
   return nullptr;
+}
+
+// static
+std::shared_ptr<ObjectFile>
+Tracer::LookupSymbolFile(const Path &path) noexcept
+{
+  auto &objectFiles = Get().mObjectFiles;
+  auto it = objectFiles.find(path);
+  if (it != std::end(objectFiles)) {
+    return it->second;
+  }
+  return nullptr;
+}
+
+/* static */
+void
+Tracer::ForEachObjectFile(const std::function<bool(ObjectFile &obj)> &onEachObjectFile)
+{
+  for (const auto &[path, obj] : Get().mObjectFiles) {
+    if (!onEachObjectFile(*obj)) {
+      return;
+    }
+  }
 }
 
 /*static */ u32

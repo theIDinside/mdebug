@@ -541,7 +541,7 @@ public:
   }
 };
 
-auto CreateSymbolFile(SupervisorState &supervisorState, const Path &path, AddrPtr addr) noexcept
+auto CreateSymbolFileIfNew(SupervisorState &supervisorState, const Path &path, AddrPtr addr) noexcept
   -> std::shared_ptr<SymbolFile>;
 
 } // namespace mdb::tc

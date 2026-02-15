@@ -413,7 +413,7 @@ Session::OpenMemoryFile() noexcept
   }
   MDB_ASSERT(!mProcFsMemFd.IsOpen(), "MemFd already open");
   const auto procMemFdPath = std::format("/proc/{}/task/{}/mem", mTaskLeader, mTaskLeader);
-  mProcFsMemFd = mdb::ScopedFd::Open(procMemFdPath, O_RDWR);
+  mProcFsMemFd = mdb::ScopedFd::Open(std::string_view{ procMemFdPath }, O_RDWR);
   MDB_ASSERT(mProcFsMemFd.IsOpen(), "Failed to open proc mem fs for {}", mTaskLeader);
 }
 

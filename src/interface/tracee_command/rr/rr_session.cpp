@@ -314,20 +314,14 @@ Session::AdjustSymbols() noexcept
   const auto dynamicSegment = baseAddress + pt_dynamic->p_vaddr;
   DBGLOG(core, "Dynamic segment mapped in at {}", dynamicSegment);
 
-  auto exe = mReplaySupervisor->ExecedFile(mTaskLeader);
+  std::string_view exe = mReplaySupervisor->ExecedFile(mTaskLeader);
 
   DBGLOG(core, "exe for forked process={}", exe);
 
-  if (auto symbol_obj = Tracer::LookupSymbolfile(exe); symbol_obj == nullptr) {
-    auto obj = ObjectFile::CreateObjectFile(TaskLeaderTid(), exe);
-    if (obj->GetElf()->AddressesNeedsRelocation()) {
-      RegisterObjectFile(this, std::move(obj), true, baseAddress);
-    } else {
-      RegisterObjectFile(this, std::move(obj), true, nullptr);
-    }
-  } else {
-    RegisterSymbolFile(symbol_obj, true);
-  }
+  auto obj = ObjectFile::GetOrCreateObjectFile(exe);
+  const AddrPtr relocated = obj->GetElf()->AddressesNeedsRelocation() ? baseAddress : nullptr;
+  auto symbolFile = SymbolFile::Create(mTaskLeader, std::move(obj), relocated);
+  RegisterSymbolFile(symbolFile, true);
 
   constexpr auto InterpreterPath = [](const Elf *elf, const ElfSection *interp) noexcept {
     MDB_ASSERT(interp->mName == ".interp", "Section is not .interp: {}", interp->mName);
@@ -339,7 +333,7 @@ Session::AdjustSymbols() noexcept
 
   const auto *mainExecutableElf = mMainExecutable->GetObjectFile()->GetElf();
   const Path interpreterPath = InterpreterPath(mainExecutableElf, mainExecutableElf->GetSection(".interp"));
-  const std::shared_ptr tempObjectFile = ObjectFile::CreateObjectFile(TaskLeaderTid(), interpreterPath);
+  const std::shared_ptr tempObjectFile = ObjectFile::GetOrCreateObjectFile(interpreterPath);
   MDB_ASSERT(tempObjectFile != nullptr, "Failed to mmap the loader binary");
 
   const auto interpreterBase = mParsedAuxiliaryVector.mInterpreterBaseAddress;
@@ -378,7 +372,7 @@ Session::AdjustSymbols() noexcept
   DBGLOG(core, "Read {} libraries", libs->size());
 
   for (const auto &lib : *libs) {
-    auto symbolFile = CreateSymbolFile(*this, lib.mPath, lib.mAddress);
+    auto symbolFile = CreateSymbolFileIfNew(*this, lib.mPath, lib.mAddress);
     if (symbolFile) {
       DBGLOG(core, "{}: registring symbol file {}", mTaskLeader, symbolFile->mSymbolObjectFileId);
       RegisterSymbolFile(symbolFile, false);

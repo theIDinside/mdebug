@@ -121,6 +121,13 @@ ScopedFd::Open(const Path &p, int flags, mode_t mode) noexcept
   return ScopedFd{ ::open(p.c_str(), flags, mode), p };
 }
 
+ScopedFd
+ScopedFd::Open(std::string_view path, int flags, mode_t mode) noexcept
+{
+  MDB_ASSERT(fs::exists(path), "File did not exist {}", path);
+  return ScopedFd{ ::open(path.data(), flags, mode), path };
+}
+
 /* static */ mdb::Expected<ScopedFd, ConnectError>
 ScopedFd::OpenSocketConnectTo(const std::string &host, int port) noexcept
 {

@@ -71,26 +71,18 @@ ParsedAuxiliaryVectorData(const Auxv &aux, ParseAuxiliaryOptions options) noexce
 
 namespace mdb::tc {
 
-/// Creates a `SymbolFile` using either an existing `ObjectFile` as storage or constructing a new one.
-/// When debugging 2 processes with the same binaries, we don't want duplicate storage.
 auto
-CreateSymbolFile(SupervisorState &supervisorState, const Path &path, AddrPtr addr) noexcept
+CreateSymbolFileIfNew(SupervisorState &supervisorState, const Path &path, AddrPtr baseAddress) noexcept
   -> std::shared_ptr<SymbolFile>
 {
-  if (auto existingObjFile = Tracer::LookupSymbolfile(path); existingObjFile) {
-    // This process already registered this symbol object.
-    if (existingObjFile->GetId() == supervisorState.TaskLeaderTid()) {
+  for (const auto &symbolFile : supervisorState.GetSymbolFiles()) {
+    if (symbolFile->GetObjectFilePath() == path) {
       return nullptr;
     }
-    // if baseAddr == addr; unique = false, return null, because we've already registered it
-    return existingObjFile->Copy(supervisorState.TaskLeaderTid(), addr);
-  } else {
-    auto obj = ObjectFile::CreateObjectFile(supervisorState.TaskLeaderTid(), path);
-    if (obj != nullptr) {
-      return SymbolFile::Create(supervisorState.TaskLeaderTid(), std::move(obj), addr);
-    }
   }
-  return nullptr;
+
+  std::shared_ptr<ObjectFile> obj = ObjectFile::GetOrCreateObjectFile(path);
+  return SymbolFile::Create(supervisorState.TaskLeaderTid(), std::move(obj), baseAddress);
 }
 
 static Path
@@ -189,7 +181,7 @@ SupervisorState::InstallDynamicLoaderBreakpoints(AddrPtr mappedDynamicSectionAdd
   MDB_ASSERT(mMainExecutable != nullptr, "No main executable for this target");
   const auto mainExecutableElf = mMainExecutable->GetObjectFile()->GetElf();
   const Path interpreterPath = InterpreterPath(mainExecutableElf, mainExecutableElf->GetSection(".interp"));
-  const std::shared_ptr tempObjectFile = ObjectFile::CreateObjectFile(TaskLeaderTid(), interpreterPath);
+  const std::shared_ptr tempObjectFile = ObjectFile::GetOrCreateObjectFile(interpreterPath);
   MDB_ASSERT(tempObjectFile != nullptr, "Failed to mmap the loader binary");
 
   const auto interpreterBase = mParsedAuxiliaryVector.mInterpreterBaseAddress;
@@ -1009,13 +1001,11 @@ SupervisorState::CacheRegistersFor(TaskInfo &t, bool forceRefresh) noexcept
 void
 SupervisorState::OnSharedObjectEvent() noexcept
 {
-  DBGLOG(core, "[{}:so] shared object event triggered", mTaskLeader);
   if (const auto readLibrariesResult = ReadLibraries(); readLibrariesResult) {
     std::vector<std::shared_ptr<SymbolFile>> objectFiles{};
     const auto &libraries = readLibrariesResult.value();
-    DBGLOG(core, "Object File Descriptors read: {}", libraries.size());
     for (const auto &[path, l_addr] : libraries) {
-      auto symbolFile = CreateSymbolFile(*this, path, l_addr);
+      auto symbolFile = CreateSymbolFileIfNew(*this, path, l_addr);
       if (symbolFile) {
         objectFiles.push_back(symbolFile);
         RegisterSymbolFile(symbolFile, false);
@@ -1023,7 +1013,7 @@ SupervisorState::OnSharedObjectEvent() noexcept
     }
     DoBreakpointsUpdate(objectFiles);
   } else {
-    DBGLOG(core, "No library info was returned");
+    DBGLOG(core, "No library info read during shared object event");
   }
 }
 
@@ -1323,16 +1313,9 @@ SupervisorState::PostExec(const std::string &exe, bool stopAtEntry, bool install
   const auto dynamicSegment = baseAddress + pt_dynamic->p_vaddr;
   DBGLOG(core, "Dynamic segment mapped in at {}", dynamicSegment);
 
-  if (auto symbol_obj = Tracer::LookupSymbolfile(exe); symbol_obj == nullptr) {
-    auto obj = ObjectFile::CreateObjectFile(TaskLeaderTid(), exe);
-    if (obj->GetElf()->AddressesNeedsRelocation()) {
-      RegisterObjectFile(this, std::move(obj), true, baseAddress);
-    } else {
-      RegisterObjectFile(this, std::move(obj), true, nullptr);
-    }
-  } else {
-    RegisterSymbolFile(symbol_obj, true);
-  }
+  auto obj = ObjectFile::GetOrCreateObjectFile(exe);
+  const AddrPtr base = obj->GetElf()->AddressesNeedsRelocation() ? baseAddress : nullptr;
+  RegisterSymbolFile(SymbolFile::Create(TaskLeaderTid(), std::move(obj), base), true);
 
   if (installDynamicLoaderBreakpoints) {
     InstallDynamicLoaderBreakpoints(dynamicSegment);
@@ -1484,7 +1467,9 @@ SupervisorState::ReadLinkerInformation(const r_debug &dbg, std::vector<ObjectFil
     auto map = map_res.value();
     auto namePointer = TPtr<char>{ map.l_name };
     const auto path = ReadNullTerminatedString(namePointer);
-    if (!path) {
+    // if the path is empty, we couldn't possibly load the object file anyhow.
+    // so, even if this ld system is reporting an object file at that address, we have no idea what it is, anyway.
+    if (!path || path->empty()) {
       DBGLOG(core, "Failed to read null-terminated string from tracee at {}", namePointer);
       return LinkerReadResult::Error;
     }

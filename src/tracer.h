@@ -126,6 +126,7 @@ class Tracer
   static JSContext *sApplicationJsContext;
   ui::dap::DebugAdapterManager *mDebugAdapterManager;
   static int sLastTraceEventTime;
+  StringMap<std::shared_ptr<ObjectFile>> mObjectFiles;
 
 #ifdef MDB_DEBUG
   u64 mDebuggerEvents;
@@ -193,7 +194,10 @@ public:
   // a protocol.
   tc::SupervisorState *SessionAttach(ui::dap::DebugAdapterManager *client, const AttachArgs &args) noexcept;
 
-  static std::shared_ptr<SymbolFile> LookupSymbolfile(const std::filesystem::path &path) noexcept;
+  static void CacheObjectFile(std::shared_ptr<ObjectFile> objectFile) noexcept;
+  static std::shared_ptr<ObjectFile> LookupSymbolFile(std::string_view pathStr) noexcept;
+  static std::shared_ptr<ObjectFile> LookupSymbolFile(const Path &path) noexcept;
+  static void ForEachObjectFile(const std::function<bool(ObjectFile &obj)> &onEachObjectFile);
 
   // std::shared_ptr<gdb::RemoteConnection> ConnectToRemoteGdb(const tc::GdbRemoteCfg &config, const
   // std::optional<gdb::RemoteSettings> &settings) noexcept;
