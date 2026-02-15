@@ -846,24 +846,23 @@ public:
       // Request sent during configuration phase
       ExecuteDuringConfigPhase(Path{ file }, std::move(specs), get<std::string>(args, kConfigToken));
       return WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::source, {} });
-    } else {
-      if (!target) {
-        TODO("Implement sending error response here, e.g. 'No target with id foo'.");
-      }
-      target->SetSourceBreakpoints(file, specs);
-
-      using BP = ui::dap::Breakpoint;
-
-      auto breakpoints = Allocate<std::pmr::vector<ui::dap::Breakpoint>>();
-      for (const auto &[bp, ids] : target->GetUserBreakpoints().GetBreakpointsFromSourceFile(file)) {
-        for (const auto id : ids) {
-          const auto user = target->GetUserBreakpoints().GetUserBreakpoint(id);
-          breakpoints->push_back(BP::CreateFromUserBreakpoint(*user, MemoryResource()));
-        }
-      }
-      return WriteResponse(
-        SetBreakpointsResponse{ true, this, BreakpointRequestKind::source, std::move(*breakpoints) });
     }
+    if (!target) {
+      TODO("Implement sending error response here, e.g. 'No target with id foo'.");
+    }
+    target->SetSourceBreakpoints(file, specs);
+
+    using BP = ui::dap::Breakpoint;
+
+    auto *breakpoints = Allocate<std::pmr::vector<ui::dap::Breakpoint>>();
+    for (const auto &[bp, ids] : target->GetUserBreakpoints().GetBreakpointsFromSourceFile(file)) {
+      for (const auto id : ids) {
+        const auto user = target->GetUserBreakpoints().GetUserBreakpoint(id);
+        breakpoints->push_back(BP::CreateFromUserBreakpoint(*user, MemoryResource()));
+      }
+    }
+    return WriteResponse(
+      SetBreakpointsResponse{ true, this, BreakpointRequestKind::source, std::move(*breakpoints) });
   }
   DEFINE_NAME("setBreakpoints");
   RequiredArguments({ "source"sv });

@@ -181,12 +181,13 @@ void
 Session::HandleEvent(const ReplayEvent &evt) noexcept
 {
   DBGBUFLOG(core,
-    "Handle event {} ({}), recorded tid={}, breakpoint={}, stepping complete={}",
+    "Handle event {} ({}), recorded tid={}, breakpoint={}, stepping complete={}, pc={}",
     evt.mStopKind,
     std::to_underlying(evt.mStopKind),
     evt.mTaskInfo.mRecTid,
     evt.mHitBreakpoint,
-    evt.mSteppingCompleted);
+    evt.mSteppingCompleted,
+    evt.mTaskInfo.mRIP);
 
   // Special case reverse. Reverse should *only* ever stop on breakpoints (non-system bps, so no shared object bps
   // for instance, only user bps) and watchpoints being hit
@@ -319,6 +320,7 @@ Session::AdjustSymbols() noexcept
   DBGLOG(core, "exe for forked process={}", exe);
 
   auto obj = ObjectFile::GetOrCreateObjectFile(exe);
+  MDB_ASSERT(obj != nullptr, "Can't recover from error: Main executable binary not found={}", exe);
   const AddrPtr relocated = obj->GetElf()->AddressesNeedsRelocation() ? baseAddress : nullptr;
   auto symbolFile = SymbolFile::Create(mTaskLeader, std::move(obj), relocated);
   RegisterSymbolFile(symbolFile, true);
@@ -366,8 +368,6 @@ Session::AdjustSymbols() noexcept
     DBGLOG(core, "{} could not read libraries", mTaskLeader);
     return;
   }
-
-  MDB_ASSERT(!libs->empty(), "No libraries could be read!");
 
   DBGLOG(core, "Read {} libraries", libs->size());
 
@@ -532,6 +532,7 @@ Session::UpdateFunctionBreakpoints(
     mUserBreakpoints.mFunctionBreakpoints.erase(iter);
   }
 
+  MDB_ASSERT(!mSymbolFiles.empty(), "Supervisor has no symbol files. That's bad.");
   for (auto &sym : mSymbolFiles) {
     for (auto &spec : add) {
       auto result = sym->LookupFunctionBreakpointBySpec(spec);

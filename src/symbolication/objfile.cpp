@@ -743,10 +743,13 @@ ObjectFile::ForEachTypeMatching(std::string_view pattern, const std::function<vo
 std::shared_ptr<ObjectFile>
 ObjectFile::GetOrCreateObjectFile(const Path &path) noexcept
 {
-  MDB_ASSERT(fs::exists(path), "File '{}' not found", path.c_str());
-
   if (auto objectFile = Tracer::LookupSymbolFile(path); objectFile) {
     return objectFile;
+  }
+
+  if (!fs::exists(path)) {
+    DBGLOG(core, "Object file path not found={}", path.c_str());
+    return nullptr;
   }
 
   auto fd = mdb::ScopedFd::OpenFileReadOnly(path);

@@ -82,6 +82,10 @@ CreateSymbolFileIfNew(SupervisorState &supervisorState, const Path &path, AddrPt
   }
 
   std::shared_ptr<ObjectFile> obj = ObjectFile::GetOrCreateObjectFile(path);
+  if (!obj) {
+    DBGLOG(core, "Could not get or create objfile for {}", path.c_str());
+    return nullptr;
+  }
   return SymbolFile::Create(supervisorState.TaskLeaderTid(), std::move(obj), baseAddress);
 }
 
@@ -1314,6 +1318,7 @@ SupervisorState::PostExec(const std::string &exe, bool stopAtEntry, bool install
   DBGLOG(core, "Dynamic segment mapped in at {}", dynamicSegment);
 
   auto obj = ObjectFile::GetOrCreateObjectFile(exe);
+  MDB_ASSERT(obj != nullptr, "Exec'ed with a binary whose path we could not determine? path={}", exe);
   const AddrPtr base = obj->GetElf()->AddressesNeedsRelocation() ? baseAddress : nullptr;
   RegisterSymbolFile(SymbolFile::Create(TaskLeaderTid(), std::move(obj), base), true);
 
@@ -1457,6 +1462,7 @@ SupervisorState::ReadLinkerInformation(const r_debug &dbg, std::vector<ObjectFil
     DBGLOG(core, "Debug state not consistent: no information about obj files read");
     return LinkerReadResult::InconsistentState;
   }
+  DBGLOG(core, "Debug state is consistent; proceed to read dbg state.");
   auto linkmap = TPtr<link_map>{ dbg.r_map };
   while (linkmap != nullptr) {
     auto map_res = SafeReadType(linkmap);
@@ -1469,11 +1475,13 @@ SupervisorState::ReadLinkerInformation(const r_debug &dbg, std::vector<ObjectFil
     const auto path = ReadNullTerminatedString(namePointer);
     // if the path is empty, we couldn't possibly load the object file anyhow.
     // so, even if this ld system is reporting an object file at that address, we have no idea what it is, anyway.
-    if (!path || path->empty()) {
+    if (!path) {
       DBGLOG(core, "Failed to read null-terminated string from tracee at {}", namePointer);
       return LinkerReadResult::Error;
     }
-    objects.emplace_back(path.value(), map.l_addr);
+    if (!path->empty()) {
+      objects.emplace_back(path.value(), map.l_addr);
+    }
     linkmap = TPtr<link_map>{ map.l_next };
   }
   return LinkerReadResult::Ok;
