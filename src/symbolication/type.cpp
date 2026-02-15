@@ -239,6 +239,16 @@ TypeStorage::CreateNewType(DwarfTag tag,
   return nullptr;
 }
 
+sym::Type *
+TypeStorage::FindTypeByOffset(u64 dieOffset) noexcept
+{
+  auto it = mTypeStorage.find(dieOffset);
+  if (it != mTypeStorage.end()) {
+    return it->second;
+  }
+  return nullptr;
+}
+
 namespace sym {
 
 bool

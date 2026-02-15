@@ -41,6 +41,9 @@ struct DieMetaData;
 class TypeStorage
 {
   std::mutex mWriteMutex;
+  // The u64 here is offset into the debug information .debug_info section
+  // And effectively, a sym::Type* maps to a debug information entry containing a type
+  // but that type can be const + another type, and this is where type chains come in.
   std::unordered_map<u64, sym::Type *> mTypeStorage;
 
 public:
@@ -60,6 +63,7 @@ public:
     sym::dw::IndexedDieReference dieReference,
     u32 typeSize,
     std::string_view name) noexcept;
+  sym::Type *FindTypeByOffset(u64 dieOffset) noexcept;
 };
 
 namespace sym {

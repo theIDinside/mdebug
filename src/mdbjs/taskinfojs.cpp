@@ -12,23 +12,23 @@ namespace mdb::js {
 static constexpr auto TaskInfoOpaqueDataErrorMessage = "Could not retrieve task info";
 
 /*static*/ JSValue
-JsTaskInfo::Id(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
+JsTaskInfo::Id(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
 {
   auto *taskInfo = GetThisOrReturnException(taskInfo, TaskInfoOpaqueDataErrorMessage);
 
-  auto id = JS_NewInt32(context, taskInfo->mTid);
+  auto id = JS_NewInt32(cx, taskInfo->mTid);
   return id;
 }
 
 /*static*/ JSValue
-JsTaskInfo::Pc(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
+JsTaskInfo::Pc(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
 {
   auto *taskInfo = GetThisOrReturnException(taskInfo, TaskInfoOpaqueDataErrorMessage);
 
-  return JS_NewBigUint64(context, taskInfo->GetPc().GetRaw());
+  return JS_NewBigUint64(cx, taskInfo->GetPc().GetRaw());
 }
 /*static*/ JSValue
-JsTaskInfo::Frame(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+JsTaskInfo::Frame(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv)
 {
   PROFILE_SCOPE("JsTaskInfo::Frame", logging::kInterpreter);
   auto *taskInfo = GetThisOrReturnException(taskInfo, TaskInfoOpaqueDataErrorMessage);
@@ -36,28 +36,28 @@ JsTaskInfo::Frame(JSContext *context, JSValue thisValue, int argCount, JSValue *
   auto supervisor = taskInfo->GetSupervisor();
 
   if (!supervisor) {
-    return JS_ThrowTypeError(context, "Could not retrieve supervisor for task");
+    return JS_ThrowTypeError(cx, "Could not retrieve supervisor for task");
   }
 
   i64 frameLevel = 0;
 
   if (argCount != 0) {
-    if (!JS_ToInt64(context, &frameLevel, argv[0])) {
-      return JS_ThrowTypeError(context, "Argument to .frame() must be an integer (or no argument, for level 0)");
+    if (!JS_ToInt64(cx, &frameLevel, argv[0])) {
+      return JS_ThrowTypeError(cx, "Argument to .frame() must be an integer (or no argument, for level 0)");
     }
     if (frameLevel < 0) {
-      return JS_ThrowTypeError(context, "Valid frame values are 0 .. N");
+      return JS_ThrowTypeError(cx, "Valid frame values are 0 .. N");
     }
   }
 
   auto &callStack = supervisor->BuildCallFrameStack(*taskInfo, CallStackRequest::full());
   auto frame = callStack.GetFrameAtLevel(static_cast<u32>(frameLevel));
-  const auto result = JsFrame::CreateValue(context, RefPtr{ new FrameLookupHandle{ RefPtr{ taskInfo }, *frame } });
+  const auto result = JsFrame::CreateValue(cx, RefPtr{ new FrameLookupHandle{ RefPtr{ taskInfo }, *frame } });
   return result;
 }
 
 /*static*/ JSValue
-JsTaskInfo::ToString(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
+JsTaskInfo::ToString(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
 {
   auto *taskInfo = GetThisOrReturnException(taskInfo, TaskInfoOpaqueDataErrorMessage);
 
@@ -69,17 +69,17 @@ JsTaskInfo::ToString(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCo
     taskInfo->mSessionId,
     taskInfo->IsStopped());
   auto len = std::distance(buf, ptr);
-  auto strValue = JS_NewStringLen(context, buf, len);
+  auto strValue = JS_NewStringLen(cx, buf, len);
   return strValue;
 }
 
 /*static*/ JSValue
-JsTaskInfo::Resume(JSContext *context, JSValue thisValue, int argCount, JSValue *argv)
+JsTaskInfo::Resume(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv)
 {
   auto *taskInfo = GetThisOrReturnException(taskInfo, TaskInfoOpaqueDataErrorMessage);
 
   if (!taskInfo->IsValid()) {
-    return JS_ThrowTypeError(context, "Can't resume task, task is invalid");
+    return JS_ThrowTypeError(cx, "Can't resume task, task is invalid");
   }
 
   auto supervisor = taskInfo->GetSupervisor();

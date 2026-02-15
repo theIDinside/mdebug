@@ -132,13 +132,12 @@ class ObjectFile
   StringMap<std::vector<std::shared_ptr<sym::dw::SourceCodeFile>>> mSourceCodeFiles;
 
   sym::AddressToCompilationUnitMap mAddressToCompileUnitMapping;
-  std::unordered_map<int, Ref<sym::Value>> mValueObjectCache;
 
 public:
   ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loaded_binary) noexcept;
   ~ObjectFile() noexcept;
 
-  static std::shared_ptr<ObjectFile> CreateObjectFile(Pid processId, const Path &path) noexcept;
+  static std::shared_ptr<ObjectFile> GetOrCreateObjectFile(const Path &path) noexcept;
 
   template <typename T>
   auto
@@ -206,6 +205,9 @@ public:
    */
   auto SearchDebugSymbolStringTable(const std::string &regex) const noexcept -> std::vector<std::string>;
 
+  auto ForEachTypeMatching(std::string_view pattern, const std::function<void(sym::Type *type)> &onEachType)
+    -> void;
+
 private:
   /**
    * Get the compilation units that *probably* span/cover the address of `programCounter`. When an object file
@@ -270,6 +272,7 @@ public:
     -> std::vector<BreakpointLookup>;
   auto GetId() noexcept -> Pid;
   auto GetTextSection() const noexcept -> const ElfSection *;
+  void ForEachTypeMatching(std::string_view pattern, const std::function<void(sym::Type *type)> &onEachType) const;
 
 private:
   auto GetVariables(sym::FrameVariableKind variables_kind, tc::SupervisorState &tc, sym::Frame &frame) noexcept

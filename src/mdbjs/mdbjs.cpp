@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "mdbjs.h"
+#include "utils/scoped_fd.h"
 
 // mdb
 #include <common.h>
@@ -7,6 +8,7 @@
 #include <mdbjs/supervisorjs.h>
 #include <mdbjs/taskinfojs.h>
 #include <mdbjs/util.h>
+#include <mdbjs/value_resolver_registry.h>
 #include <session_task_map.h>
 #include <tracer.h>
 #include <utils/logger.h>
@@ -92,7 +94,8 @@ JavascriptException::GetException(JSContext *context) noexcept
 
 Scripting::Scripting(JSRuntime *runtime, JSContext *context) noexcept
     : mRuntime(runtime), mContext(context),
-      mBumpAllocator(alloc::ArenaResource::CreateUniquePtr(alloc::Page{ 32 }))
+      mBumpAllocator(alloc::ArenaResource::CreateUniquePtr(alloc::Page{ 32 })),
+      mRegistry(ResolverRegistry::Init(context))
 {
 }
 
@@ -221,6 +224,82 @@ Scripting::Help(JSContext *ctx, [[maybe_unused]] JSValueConst thisValue, JS_UNUS
 {
   auto msg = HelpMessage();
   return JS_NewStringLen(ctx, msg.data(), msg.size());
+}
+
+/* static */ JSValue
+Scripting::RegisterResolver(
+  JSContext *cx, [[maybe_unused]] JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
+{
+  if (argCount < 2) {
+    return JS_ThrowTypeError(cx, "Invalid args: requires ({name, match}, resolveApplyFn)");
+  }
+
+  if (!JS_IsObject(argv[0])) {
+    return JS_ThrowTypeError(
+      cx, "Invalid args: first argument must be an object containing name and match fields of type string");
+  }
+
+  // Validate that the object contains 'name' and 'match' fields of type string
+
+  StackValue nameValue = StackValue::GetPropertyString(cx, argv[0], "name");
+  StackValue matchValue = StackValue::GetPropertyString(cx, argv[0], "match");
+
+  if (JS_IsUndefined(nameValue)) {
+    return JS_ThrowTypeError(cx, "Invalid args: object must contain a 'name' field");
+  }
+
+  if (JS_IsUndefined(matchValue)) {
+    return JS_ThrowTypeError(cx, "Invalid args: object must contain a 'match' field");
+  }
+
+  if (!JS_IsString(nameValue)) {
+    return JS_ThrowTypeError(cx, "Invalid args: 'name' field must be of type string");
+  }
+
+  if (!JS_IsString(matchValue)) {
+    return JS_ThrowTypeError(cx, "Invalid args: 'match' field must be of type string");
+  }
+
+  if (!JS_IsFunction(cx, argv[1])) {
+    return JS_ThrowTypeError(
+      cx, "Invalid args: second argument must be a function that returns an array of JsVariables");
+  }
+
+  auto name = QuickJsString::FromValue(cx, nameValue);
+  auto match = QuickJsString::FromValue(cx, matchValue);
+
+  Get().mRegistry->RegisterResolver(std::string{ name.mString }, std::string{ match.mString }, argv[1]);
+
+  return JS_UNDEFINED;
+}
+
+/* static */ JSValue
+Scripting::LoadScript(
+  JSContext *cx, [[maybe_unused]] JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
+{
+  if (argCount < 1) {
+    return JS_ThrowTypeError(cx, "Invalid args: loadScript requires a file path argument");
+  }
+
+  if (!JS_IsString(argv[0])) {
+    return JS_ThrowTypeError(cx, "Invalid args: file path must be a string");
+  }
+
+  auto pathString = QuickJsString::FromValue(cx, argv[0]);
+  ScopedFd f = ScopedFd::Open(pathString.mString);
+  MemoryMapping data = f.MemoryMap<char>();
+
+  if (!data.IsOpen()) {
+    return JS_ThrowTypeError(cx, "Failed to open file: %s", pathString.mString.data());
+  }
+
+  StackValue result = StackValue::Eval(cx, data.Data(), data.FileContentsLength(), pathString.mString.data());
+
+  if (JS_IsException(result)) {
+    return result.Throw();
+  };
+
+  return JS_UNDEFINED;
 }
 
 void

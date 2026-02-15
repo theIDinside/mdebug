@@ -23,11 +23,11 @@ ToString(Out iteratorLike, const TaskT &entry)
 
 struct JsTaskInfo : public JSBinding<JsTaskInfo, TaskInfo, JavascriptClasses::TaskInfo>
 {
-  static auto Id(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
-  static auto Pc(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
-  static auto Frame(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
-  static auto ToString(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
-  static auto Resume(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Id(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Pc(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Frame(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto ToString(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Resume(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
 
   static constexpr std::span<const JSCFunctionListEntry>
   PrototypeFunctions() noexcept

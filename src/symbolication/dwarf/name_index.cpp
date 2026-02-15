@@ -43,7 +43,7 @@ DieNameReference::SetCollisionIndex(u64 index) noexcept
   collision_displacement_index = index;
 }
 
-NameIndex::NameIndex(std::string_view name) noexcept : mName(name), mMutex()
+NameIndex::NameIndex(std::string_view name) noexcept : mName(name)
 {
   mNameIndexShards.reserve(mdb::ThreadPool::GetGlobalPool()->WorkerCount());
 }
@@ -61,7 +61,7 @@ NameIndex::NameIndexShard::Search(std::string_view name) const noexcept
   }
 
   const auto collision_index = it->second.collision_displacement_index;
-  auto &dies = mCollidingNames[collision_index];
+  const auto &dies = mCollidingNames[collision_index];
   return std::span{ dies };
 }
 
@@ -86,10 +86,10 @@ void
 NameIndex::NameIndexShard::ConvertToCollisionVariant(DieNameReference &elem, u64 die_index, UnitData *cu) noexcept
 {
   const auto index = mCollidingNames.size();
-  mCollidingNames.push_back({});
+  mCollidingNames.emplace_back();
   auto &collisions = mCollidingNames.back();
-  collisions.push_back(DieNameReference{ elem.cu, elem.die_index });
-  collisions.push_back(DieNameReference{ cu, die_index });
+  collisions.emplace_back(elem.cu, elem.die_index);
+  collisions.emplace_back(cu, die_index);
   elem.SetAsCollisionVariant(index);
 }
 
@@ -122,32 +122,32 @@ NameIndex::MergeTypes(
   auto &shard = *CreateShard();
   for (const auto &[name, idx, cu, hash] : nameToDieReferences) {
     shard.AddName(name, idx, cu);
-    const auto die_ref = cu->GetDieByCacheIndex(idx);
-    const auto this_die = die_ref.GetDie();
-    if (this_die->mTag == DwarfTag::DW_TAG_typedef || this_die->mTag == DwarfTag::DW_TAG_array_type) {
+    const auto dieRef = cu->GetDieByCacheIndex(idx);
+    const DieMetaData *thisDie = dieRef.GetDie();
+    if (thisDie->mTag == DwarfTag::DW_TAG_typedef || thisDie->mTag == DwarfTag::DW_TAG_array_type) {
       continue;
     }
-    const auto offs = Offset{ die_ref.GetDie()->mSectionOffset };
-    const auto possible_size = die_ref.ReadAttribute(Attribute::DW_AT_byte_size);
-    MDB_ASSERT(possible_size.has_value(),
+    const auto offs = Offset{ dieRef.GetDie()->mSectionOffset };
+    const auto possibleSize = dieRef.ReadAttribute(Attribute::DW_AT_byte_size);
+    MDB_ASSERT(possibleSize.has_value(),
       "Expected a 'root' die for a type to have a byte size cu={}, die=0x{:x}, objfile={}",
       cu->SectionOffset(),
-      die_ref.GetDie()->mSectionOffset,
+      dieRef.GetDie()->mSectionOffset,
       cu->GetObjectFile()->GetObjectFileId());
 
-    auto type = typeStorage->CreateNewType(
-      this_die->mTag, offs, IndexedDieReference{ cu, idx }, possible_size->AsUnsignedValue(), name);
-    if (die_ref.GetDie()->mTag == DwarfTag::DW_TAG_base_type) {
+    Type *type = typeStorage->CreateNewType(
+      thisDie->mTag, offs, IndexedDieReference{ cu, idx }, possibleSize->AsUnsignedValue(), name);
+    if (dieRef.GetDie()->mTag == DwarfTag::DW_TAG_base_type) {
       UnitReader reader{ cu };
-      reader.SeekDie(*die_ref.GetDie());
-      auto attr = die_ref.ReadAttribute(Attribute::DW_AT_encoding);
+      reader.SeekDie(*dieRef.GetDie());
+      auto attr = dieRef.ReadAttribute(Attribute::DW_AT_encoding);
       MDB_ASSERT(attr.has_value(),
         "Failed to read encoding of base type. cu={}, die=0{:x}, objfile={}",
         cu->SectionOffset(),
-        die_ref.GetDie()->mSectionOffset,
+        dieRef.GetDie()->mSectionOffset,
         cu->GetObjectFile()->GetObjectFileId());
       auto encoding = attr.and_then(
-        [](auto val) { return std::optional{ static_cast<BaseTypeEncoding>(val.AsUnsignedValue()) }; });
+        [](const auto &val) { return std::optional{ static_cast<BaseTypeEncoding>(val.AsUnsignedValue()) }; });
       type->SetBaseTypeEncoding(encoding.value());
     }
   }

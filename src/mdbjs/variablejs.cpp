@@ -28,14 +28,14 @@ static constexpr auto kTypeBindingDataError = "Could not read sym::Type*";
 static constexpr auto IsCurrentValue = [](const sym::Value &v) { return v.IsValidValue() && v.IsLive(); };
 
 /* static */ JSValue
-JsType::Name(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
+JsType::Name(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   sym::Type *type = GetThisOrReturnException(type, kTypeBindingDataError);
-  return JS_NewStringLen(context, type->mName->data(), type->mName->size());
+  return JS_NewStringLen(cx, type->mName->data(), type->mName->size());
 }
 
 /* static */ JSValue
-JsType::ToString(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
+JsType::ToString(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   sym::Type *type = GetThisOrReturnException(type, kTypeBindingDataError);
 
@@ -46,29 +46,36 @@ JsType::ToString(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount,
   // Format the type using the std::formatter<sym::Type>
   std::format_to(std::back_inserter(buffer), "{}", *type);
 
-  return JS_NewStringLen(context, buffer.data(), buffer.size());
+  return JS_NewStringLen(cx, buffer.data(), buffer.size());
 }
 
 /* static */ JSValue
-JsType::SizeOf(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
+JsType::SizeOf(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   sym::Type *type = GetThisOrReturnException(type, kTypeBindingDataError);
-  return JS_NewUint32(context, type->Size());
+  return JS_NewUint32(cx, type->Size());
 }
 
 /* static */ JSValue
-JsType::Member(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
+JsType::PointeeSize(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
+{
+  sym::Type *type = GetThisOrReturnException(type, kTypeBindingDataError);
+  return JS_NewUint32(cx, type->TypeDescribingLayoutOfThis()->Size());
+}
+
+/* static */ JSValue
+JsType::Member(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   sym::Type *type = GetThisOrReturnException(type, kTypeBindingDataError);
 
   if (argCount != 1 || !JS_IsString(argv[0])) {
-    return JS_ThrowTypeError(context, "Member method requires a string argument (member name)");
+    return JS_ThrowTypeError(cx, "Member method requires a string argument (member name)");
   }
 
-  const char *memberName = JS_ToCString(context, argv[0]);
+  const char *memberName = JS_ToCString(cx, argv[0]);
   ScopedDefer defer{ [&]() {
     if (memberName) {
-      JS_FreeCString(context, memberName);
+      JS_FreeCString(cx, memberName);
     }
   } };
 
@@ -76,7 +83,7 @@ JsType::Member(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, a
   const auto &fields = type->MemberFields();
   for (const auto &field : fields) {
     if (field.mName == memberName) {
-      return JsType::CreateValue(context, field.mType.Ptr());
+      return JsType::CreateValue(cx, field.mType.Ptr());
     }
   }
 
@@ -84,46 +91,46 @@ JsType::Member(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, a
 
   const auto msg = std::format("Type '{}' does not have a member named '{}'", type->mName->data(), memberName);
 
-  return JS_ThrowTypeError(context, "%s", msg.c_str());
+  return JS_ThrowTypeError(cx, "%s", msg.c_str());
 }
 
 /* static */ JSValue
-JsType::Members(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
+JsType::Members(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   sym::Type *type = GetThisOrReturnException(type, kTypeBindingDataError);
 
   const auto &fields = type->MemberFields();
-  JSValue array = JS_NewArray(context);
+  JSValue array = JS_NewArray(cx);
 
   for (u32 i = 0; i < fields.size(); ++i) {
-    JSValue memberType = JsType::CreateValue(context, fields[i].mType.Ptr());
-    JS_SetPropertyUint32(context, array, i, memberType);
+    JSValue memberType = JsType::CreateValue(cx, fields[i].mType.Ptr());
+    JS_SetPropertyUint32(cx, array, i, memberType);
   }
 
   return array;
 }
 
 /* static */ auto
-JsType::ToPrimitive(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue
+JsType::ToPrimitive(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue
 {
   sym::Type *type = GetThisOrReturnException(type, kTypeBindingDataError);
 
   // For types, we return the name as a string representation
-  return JS_NewStringLen(context, type->mName->data(), type->mName->size());
+  return JS_NewStringLen(cx, type->mName->data(), type->mName->size());
 }
 
 /* static */ JSValue
-JsVariable::Id(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
+JsVariable::Id(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   sym::Value *type = GetThisOrReturnException(type, kBindingDataError);
-  return JS_NewUint32(context, type->ReferenceId());
+  return JS_NewUint32(cx, type->ReferenceId());
 }
 
 /* static */ JSValue
-JsVariable::Name(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
+JsVariable::Name(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   sym::Value *type = GetThisOrReturnException(type, kBindingDataError);
-  return JS_NewStringLen(context, type->mName.StringView().data(), type->mName.StringView().size());
+  return JS_NewStringLen(cx, type->mName.StringView().data(), type->mName.StringView().size());
 }
 
 static inline std::optional<sym::SerializeOptions>
@@ -158,35 +165,35 @@ GetSerializeOptionsFromJsArg(JSContext *context, int argCount, JSValue *argv) no
 }
 
 /* static */ JSValue
-JsVariable::ToString(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
+JsVariable::ToString(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   sym::Value *pointer = GetThisOrReturnException(pointer, kBindingDataError);
-  auto serializeOptions = GetSerializeOptionsFromJsArg(context, argCount, argv).value_or({});
+  auto serializeOptions = GetSerializeOptionsFromJsArg(cx, argCount, argv).value_or({});
 
   auto scopedTemporary = Scripting::GetAllocator()->ScopeAllocation();
   std::pmr::string buffer{ scopedTemporary.GetAllocator() };
   buffer.reserve(4096);
   sym::JavascriptValueSerializer::Serialize(pointer, buffer, serializeOptions);
 
-  return JS_NewStringLen(context, buffer.data(), buffer.size());
+  return JS_NewStringLen(cx, buffer.data(), buffer.size());
 }
 
 /* static */ JSValue
-JsVariable::TypeName(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
+JsVariable::TypeName(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   auto *pointer = GetThisOrReturnException(pointer, kBindingDataError);
-  return JS_NewStringLen(context, pointer->GetType()->mName->data(), pointer->GetType()->mName->size());
+  return JS_NewStringLen(cx, pointer->GetType()->mName->data(), pointer->GetType()->mName->size());
 }
 
 /* static */ JSValue
-JsVariable::Address(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
+JsVariable::Address(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   auto *pointer = GetThisOrReturnException(pointer, kBindingDataError);
-  return JS_NewBigUint64(context, pointer->Address().GetRaw());
+  return JS_NewBigUint64(cx, pointer->Address().GetRaw());
 }
 
 /* static */ JSValue
-JsVariable::Dereference(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
+JsVariable::Dereference(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   sym::Value *value = GetThisOrReturnException(value, kBindingDataError);
   auto pointeeAddr = value->ToRemotePointer();
@@ -195,26 +202,26 @@ JsVariable::Dereference(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(ar
 
   if (argCount > 0) {
     if (!JS_IsNumber(argv[0])) {
-      return JS_ThrowTypeError(context, "deref argument must be a number");
+      return JS_ThrowTypeError(cx, "deref argument must be a number");
     }
-    JS_ToUint32(context, &derefCount, argv[0]);
+    JS_ToUint32(cx, &derefCount, argv[0]);
   }
 
   const auto v = value->Dereference(derefCount).and_then([&](auto &&v) {
-    return std::expected<JSValue, sym::ValueError>{ JsVariable::CreateValue(context, std::move(v[0])) };
+    return std::expected<JSValue, sym::ValueError>{ JsVariable::CreateValue(cx, std::move(v[0])) };
   });
 
   if (!v.has_value()) {
     switch (v.error().mType) {
     case sym::ValueErrorType::InvalidSize:
-      return JS_ThrowTypeError(context, "Dereference Error: Value is not size 8");
+      return JS_ThrowTypeError(cx, "Dereference Error: Value is not size 8");
     case sym::ValueErrorType::NotAReference:
-      return JS_ThrowTypeError(context, "Dereference Error: Value is not a reference");
+      return JS_ThrowTypeError(cx, "Dereference Error: Value is not a reference");
     case sym::ValueErrorType::InvalidMemoryAddress:
       return JS_ThrowTypeError(
-        context, "Dereference Error: Invalid memory address 0x%lx.", v.error().mAddress.GetRaw());
+        cx, "Dereference Error: Invalid memory address 0x%lx.", v.error().mAddress.GetRaw());
     case sym::ValueErrorType::NoVariableContext:
-      return JS_ThrowTypeError(context, "Dereference Error: No variable context.");
+      return JS_ThrowTypeError(cx, "Dereference Error: No variable context.");
     }
   }
 
@@ -222,7 +229,7 @@ JsVariable::Dereference(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(ar
 }
 
 /* static */ JSValue
-JsVariable::Bytes(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
+JsVariable::Bytes(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   auto *pointer = GetThisOrReturnException(pointer, kBindingDataError);
 
@@ -230,28 +237,28 @@ JsVariable::Bytes(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount
   u8 *bytes = new u8[sizeBytes];
   std::memcpy(bytes, pointer->MemoryView().data(), sizeBytes);
   return JS_NewArrayBuffer(
-    context, bytes, sizeBytes, [](JSRuntime *, void *, void *ptr) { delete (u8 *)ptr; }, nullptr, false);
+    cx, bytes, sizeBytes, [](JSRuntime *, void *, void *ptr) { delete (u8 *)ptr; }, nullptr, false);
 }
 
 /* static */ JSValue
-JsVariable::IsLive(JSContext *context, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
+JsVariable::IsLive(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   auto *pointer = GetThisOrReturnException(pointer, kBindingDataError);
-  return JS_NewBool(context, pointer->IsLive());
+  return JS_NewBool(cx, pointer->IsLive());
 }
 
 /* static */
 JSValue
-JsVariable::SetValue(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept
+JsVariable::SetValue(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept
 {
   sym::Value *type = GetThisOrReturnException(type, kBindingDataError);
   if (!IsCurrentValue(*type)) {
-    return JS_ThrowTypeError(context, "Can't set the value of a variable that no longer is alive.");
+    return JS_ThrowTypeError(cx, "Can't set the value of a variable that no longer is alive.");
   }
 
   if (argCount != 1) {
     return JS_ThrowTypeError(
-      context, "method takes 1 argument, the contents that shall be written to the variable's backing storage.");
+      cx, "method takes 1 argument, the contents that shall be written to the variable's backing storage.");
   }
 
   const auto arg = argv[0];
@@ -260,29 +267,29 @@ JsVariable::SetValue(JSContext *context, JSValue thisValue, int argCount, JSValu
   switch (argTag) {
   case JS_TAG_INT: {
     int32_t value = 0;
-    JS_ToInt32(context, &value, arg);
+    JS_ToInt32(cx, &value, arg);
     if (!type->WritePrimitive(value)) {
-      return JS_ThrowTypeError(context, "Failed to set value of variable");
+      return JS_ThrowTypeError(cx, "Failed to set value of variable");
     }
   } break;
   case JS_TAG_BIG_INT: {
     int64_t value = 0;
-    JS_ToBigInt64(context, &value, arg);
+    JS_ToBigInt64(cx, &value, arg);
     if (!type->WritePrimitive(value)) {
-      return JS_ThrowTypeError(context, "Failed to set value of variable");
+      return JS_ThrowTypeError(cx, "Failed to set value of variable");
     }
   } break;
   case JS_TAG_FLOAT64: {
     double value = 0;
-    JS_ToFloat64(context, &value, arg);
+    JS_ToFloat64(cx, &value, arg);
     if (!type->WritePrimitive(value)) {
-      return JS_ThrowTypeError(context, "Failed to set value of variable");
+      return JS_ThrowTypeError(cx, "Failed to set value of variable");
     }
   } break;
   case JS_TAG_BOOL: {
-    bool value = JS_ToBool(context, arg);
+    bool value = JS_ToBool(cx, arg);
     if (!type->WritePrimitive(value)) {
-      return JS_ThrowTypeError(context, "Failed to set value of variable");
+      return JS_ThrowTypeError(cx, "Failed to set value of variable");
     }
   } break;
   case JS_TAG_STRING: // TODO: Implement
@@ -292,20 +299,19 @@ JsVariable::SetValue(JSContext *context, JSValue thisValue, int argCount, JSValu
   default:
     break;
   }
-  return JS_ThrowTypeError(
-    context, "Unsupported JS Value tag for this operation (Variable::SetValue): %d", argTag);
+  return JS_ThrowTypeError(cx, "Unsupported JS Value tag for this operation (Variable::SetValue): %d", argTag);
 }
 
 /* static */
 JSValue
-JsVariable::ToPrimitive(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept
+JsVariable::ToPrimitive(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept
 {
   PROFILE_SCOPE("JsVariable::ToPrimitive", logging::kInterpreter);
   auto *value = GetThisOrReturnException(value, "Could not read sym::Value");
   QuickJsString hintArg;
 
   if (argCount > 0 && JS_IsString(argv[0])) {
-    hintArg = QuickJsString::FromValue(context, argv[0]);
+    hintArg = QuickJsString::FromValue(cx, argv[0]);
   }
 
   sym::Type *type = value->GetType();
@@ -315,11 +321,11 @@ JsVariable::ToPrimitive(JSContext *context, JSValue thisValue, int argCount, JSV
     switch (*baseType) {
     case BaseTypeEncoding::DW_ATE_address: {
       std::uintptr_t value = sym::BitCopy<std::uintptr_t>(byteSpan);
-      return JS_NewBigUint64(context, value);
+      return JS_NewBigUint64(cx, value);
     }
     case BaseTypeEncoding::DW_ATE_boolean: {
       bool value = sym::BitCopy<bool>(byteSpan);
-      return JS_NewBool(context, value);
+      return JS_NewBool(cx, value);
     }
     case BaseTypeEncoding::DW_ATE_float: {
       double doubleValue;
@@ -333,7 +339,7 @@ JsVariable::ToPrimitive(JSContext *context, JSValue thisValue, int argCount, JSV
       default:
         PANIC("Unexpected floating point size");
       }
-      return JS_NewFloat64(context, doubleValue);
+      return JS_NewFloat64(cx, doubleValue);
     }
     case BaseTypeEncoding::DW_ATE_signed:
       [[fallthrough]];
@@ -341,19 +347,19 @@ JsVariable::ToPrimitive(JSContext *context, JSValue thisValue, int argCount, JSV
       switch (type->Size()) {
       case 1: {
         int res = int{ sym::BitCopy<signed char>(byteSpan) };
-        return JS_NewInt32(context, res);
+        return JS_NewInt32(cx, res);
       }
       case 2: {
         int res = int{ sym::BitCopy<signed short>(byteSpan) };
-        return JS_NewInt32(context, res);
+        return JS_NewInt32(cx, res);
       }
       case 4: {
         int res = sym::BitCopy<int>(byteSpan);
-        return JS_NewInt32(context, res);
+        return JS_NewInt32(cx, res);
       }
       case 8: {
         i64 res = sym::BitCopy<i64>(byteSpan);
-        return JS_NewInt64(context, res);
+        return JS_NewInt64(cx, res);
       }
       }
     }
@@ -363,19 +369,19 @@ JsVariable::ToPrimitive(JSContext *context, JSValue thisValue, int argCount, JSV
       switch (type->Size()) {
       case 1: {
         u8 res = sym::BitCopy<unsigned char>(byteSpan);
-        return JS_NewUint32(context, res);
+        return JS_NewUint32(cx, res);
       }
       case 2: {
         u16 res = sym::BitCopy<unsigned short>(byteSpan);
-        return JS_NewUint32(context, res);
+        return JS_NewUint32(cx, res);
       }
       case 4: {
         u32 res = sym::BitCopy<u32>(byteSpan);
-        return JS_NewUint32(context, res);
+        return JS_NewUint32(cx, res);
       }
       case 8: {
         u64 res = sym::BitCopy<u64>(byteSpan);
-        return JS_NewBigUint64(context, res);
+        return JS_NewBigUint64(cx, res);
       }
       }
     }
@@ -392,64 +398,64 @@ JsVariable::ToPrimitive(JSContext *context, JSValue thisValue, int argCount, JSV
     case BaseTypeEncoding::DW_ATE_ASCII:
     case BaseTypeEncoding::DW_ATE_lo_user:
     case BaseTypeEncoding::DW_ATE_hi_user:
-      return JS_NewString(context, "[object JsVariable]");
+      return JS_NewString(cx, "[object JsVariable]");
       break;
     default:
       PANIC("Added type that is unhandled!");
     }
   } else if (type->IsReference()) {
-    DBGLOG(core, "We've not implemented string comparisons.");
+    // For pointers and references, return the address as a BigInt for arithmetic operations
+    auto address = value->ToRemotePointer();
+    if (!address.has_value()) {
+      return JS_ThrowTypeError(cx, "Failed to read pointer value");
+    }
+    return JS_NewBigUint64(cx, address->GetRaw());
   }
-  return JS_UNDEFINED;
+
+  // For non-primitive, non-pointer types, return a string representation
+  return JS_NewString(cx, "[object JsVariable]");
 }
 
 /* static */ JSValue
-JsVariable::Type(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept
+JsVariable::Type(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept
 {
   auto *value = GetThisOrReturnException(value, "Could not read sym::Value");
-  return JsType::CreateValue(context, value->GetType());
+  return JsType::CreateValue(cx, value->GetType());
 }
 
 /* static */ JSValue
-JsVariable::Member(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept
+JsVariable::Member(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept
 {
   if (argCount != 1 || !JS_IsString(argv[0])) {
-    return JS_ThrowTypeError(context, "Member method requires a string argument (member name)");
+    return JS_ThrowTypeError(cx, "Member method requires a string argument (member name)");
   }
 
-  auto memberName = QuickJsString::FromValue(context, argv[0]);
+  auto memberName = QuickJsString::FromValue(cx, argv[0]);
 
   sym::Value *value = GetThisOrReturnException(value, kTypeBindingDataError);
   sym::Type *type = value->EnsureTypeResolved();
 
-  // Get the member fields and search for the requested member
-  const auto &fields = type->MemberFields();
-  for (const auto &field : fields) {
-    if (field.mName.Cast() == memberName) {
-      return JsType::CreateValue(context, field.mType.Ptr());
-    }
+  auto memberValue = value->GetMember(memberName.mString);
+
+  if (!memberValue) {
+    const auto msg =
+      std::format("Type '{}' does not have a member named '{}'", type->mName->data(), memberName.mString);
+
+    return JS_ThrowTypeError(cx, "%s", msg.c_str());
   }
-
-  // Don't do this allocation every time.
-
-  const auto msg =
-    std::format("Type '{}' does not have a member named '{}'", type->mName->data(), memberName.mString);
-
-  return JS_ThrowTypeError(context, "%s", msg.c_str());
-
-  return JS_UNDEFINED;
+  return JsVariable::CreateValue(cx, std::move(memberValue));
 }
 
 /* static */ JSValue
-JsVariable::Members(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept
+JsVariable::Members(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept
 {
   sym::Value *pointer = GetThisOrReturnException(pointer, kBindingDataError);
-  JSValue array = JS_NewArray(context);
+  JSValue array = JS_NewArray(cx);
 
   auto i = 0U;
-  (void)pointer->PushMemberValue([&i, context, array](Ref<sym::Value> value) {
-    JSValue memberType = JsVariable::CreateValue(context, std::move(value));
-    JS_SetPropertyUint32(context, array, i, memberType);
+  (void)pointer->PushMemberValue([&i, cx, array](Ref<sym::Value> value) {
+    JSValue memberType = JsVariable::CreateValue(cx, std::move(value));
+    JS_SetPropertyUint32(cx, array, i, memberType);
     ++i;
     return true;
   });
@@ -458,36 +464,36 @@ JsVariable::Members(JSContext *context, JSValue thisValue, int argCount, JSValue
 }
 
 /* static */ JSValue
-JsVariable::MemberCount(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept
+JsVariable::MemberCount(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept
 {
   sym::Value *pointer = GetThisOrReturnException(pointer, kBindingDataError);
   const size_t count = pointer->EnsureTypeResolved()->MemberFields().size();
-  return JS_NewUint32(context, count);
+  return JS_NewUint32(cx, count);
 }
 
 // Note, should (in time) turn a type T* to a T[]. If you have a type T* and you want an array of pointers,
 // you need to first promote, to T **, then .asArray -> T*[]
 /* static */ JSValue
-JsVariable::AsArray(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept
+JsVariable::AsArray(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept
 {
-  JSValue array = JS_NewArray(context);
+  JSValue array = JS_NewArray(cx);
 
   if (argCount != 1 || !JS_IsNumber(argv[0])) {
-    return JS_ThrowTypeError(context, "asArray takes a number as an argument");
+    return JS_ThrowTypeError(cx, "asArray takes a number as an argument");
   }
 
   sym::Value *pointer = GetThisOrReturnException(pointer, kBindingDataError);
   auto res = pointer->ToRemotePointer();
   if (!res.has_value()) {
-    return JS_ThrowTypeError(context, "value is not a representation of a memory address");
+    return JS_ThrowTypeError(cx, "value is not a representation of a memory address");
   }
 
   u32 count = 0;
-  JS_ToUint32(context, &count, argv[0]);
+  JS_ToUint32(cx, &count, argv[0]);
 
   auto varContext = pointer->GetVariableContext();
   if (!varContext) {
-    return JS_ThrowTypeError(context, "No variable context found");
+    return JS_ThrowTypeError(cx, "No variable context found");
   }
 
   auto synthetic = sym::MemoryContentsObject::CreateSyntheticVariable(*varContext->mTask->GetSupervisor(),
@@ -500,7 +506,7 @@ JsVariable::AsArray(JSContext *context, JSValue thisValue, int argCount, JSValue
   size_t i = 0;
   synthetic->PushMemberValue([&](Ref<sym::Value> value) {
     // we want everyone
-    JS_SetPropertyUint32(context, array, i, JsVariable::CreateValue(context, std::move(value)));
+    JS_SetPropertyUint32(cx, array, i, JsVariable::CreateValue(cx, std::move(value)));
     ++i;
     return true;
   });
@@ -510,11 +516,11 @@ JsVariable::AsArray(JSContext *context, JSValue thisValue, int argCount, JSValue
 
 /* static */ JSValue
 JsVariable::GetMemberVariable(
-  JSContext *context, JSValueConst thisValue, JSAtom prop, [[maybe_unused]] JSValueConst receiverValue) noexcept
+  JSContext *cx, JSValueConst thisValue, JSAtom prop, [[maybe_unused]] JSValueConst receiverValue) noexcept
 {
   JSPropertyDescriptor desc;
-  if (JS_GetOwnProperty(context, &desc, thisValue, prop)) {
-    JSValue val = JS_DupValue(context, desc.value);
+  if (JS_GetOwnProperty(cx, &desc, thisValue, prop)) {
+    JSValue val = JS_DupValue(cx, desc.value);
     return val;
   }
   sym::Value *pointer = GetThisOrReturnException(pointer, kBindingDataError);
@@ -522,10 +528,10 @@ JsVariable::GetMemberVariable(
   // TODO: Implement our own DebuggerAtom type, which we can share with QuickJs, this will make future
   // lookups/comparisons between strings faster. This todo has duplicates.
 
-  const char *propertyName = JS_AtomToCString(context, prop);
+  const char *propertyName = JS_AtomToCString(cx, prop);
   ScopedDefer defer{ [&]() {
     if (propertyName) {
-      JS_FreeCString(context, propertyName);
+      JS_FreeCString(cx, propertyName);
     }
   } };
 
@@ -535,10 +541,10 @@ JsVariable::GetMemberVariable(
     // TODO: Stop allocation error msg strings
     const auto err = std::format(
       "[mdbjs]: Type <{}> doesn't have a member called '{}'", pointer->GetType()->mName->data(), propertyName);
-    return JS_ThrowTypeError(context, "%s", err.c_str());
+    return JS_ThrowTypeError(cx, "%s", err.c_str());
   }
 
-  return JsVariable::CreateValue(context, member);
+  return JsVariable::CreateValue(cx, member);
 }
 
 } // namespace mdb::js

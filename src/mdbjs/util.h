@@ -27,8 +27,11 @@ struct StackValue
   StackValue &operator=(const StackValue &) = delete;
 
   StackValue GetPropertyUint32(u32 index) const;
+  StackValue GetPropertyString(const char *string) const;
 
   JSValue Throw();
+  JSValue Release();
+  static StackValue GetGlobal(JSContext *cx);
   static StackValue Wrap(JSContext *cx, JSValue value);
   static StackValue NewUint32(JSContext *cx, u32 value);
   static StackValue NewInt32(JSContext *cx, int value);

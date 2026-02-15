@@ -44,6 +44,8 @@ enum class StaticAtom : JSAtom
 
 namespace mdb::js {
 
+class ResolverRegistry;
+
 // Todo: In the future this interface will probably change
 // where we instead return some structured data for the exception that happened in js-land.
 // For now, if this returns a non-none value, it means an exception happened (and we consumed it).
@@ -66,7 +68,12 @@ class EventDispatcher;
   FNDESC(GetSupervisors, "supervisors", 0, "Get all supervisors")                                                 \
   FNDESC(PrintThreads, "listThreads", 0, "List all threads in this debug session")                                \
   FNDESC(PrintProcesses, "procs", 0, "List all processes supervisor info")                                        \
-  FNDESC(Help, "help", 1, "Show this help message.")
+  FNDESC(Help, "help", 1, "Show this help message.")                                                              \
+  FNDESC(RegisterResolver,                                                                                        \
+    "registerResolver",                                                                                           \
+    2,                                                                                                            \
+    "Register a value resolver, resolving your types in the fashion that you're interested in. ")                 \
+  FNDESC(LoadScript, "loadScript", 1, "Load and execute a JavaScript file from an absolute path.")
 
 using JsFunction = JSValue (*)(JSContext *ctx, JSValueConst thisValue, int argCount, JSValueConst *argv);
 
@@ -99,6 +106,7 @@ private:
   JSRuntime *mRuntime;
   JSContext *mContext;
   UniquePtr<alloc::ArenaResource> mBumpAllocator;
+  ResolverRegistry *mRegistry{ nullptr };
 
   Scripting(JSRuntime *runtime, JSContext *context) noexcept;
 
@@ -155,6 +163,12 @@ public:
     }
 
     std::unreachable();
+  }
+
+  static ResolverRegistry *
+  GetResolverRegistry()
+  {
+    return sInstance->mRegistry;
   }
 
   bool ExceptionToPrintableOutput(std::pmr::string &output) noexcept;

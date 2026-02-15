@@ -1163,12 +1163,11 @@ struct ReadMemory final : public ui::UICommand
       res->mSuccess = true;
       res->mUnreadableBytes = 0;
       return WriteResponse(*res);
-    } else {
-      return WriteResponse(ErrorResponse{ Request,
-        this,
-        std::pmr::string{ "Address parameter could not be parsed.", MemoryResource() },
-        std::nullopt });
     }
+    return WriteResponse(ErrorResponse{ Request,
+      this,
+      std::pmr::string{ "Address parameter could not be parsed.", MemoryResource() },
+      std::nullopt });
   }
 
   std::optional<AddrPtr> mAddress;

@@ -7,6 +7,8 @@
 #include <jobs/dwarf_unit_data.h>
 #include <jobs/index_die_names.h>
 #include <lib/arena_allocator.h>
+#include <mdbjs/mdbjs.h>
+#include <mdbjs/value_resolver_registry.h>
 #include <symbolication/block.h>
 #include <symbolication/callstack.h>
 #include <symbolication/cu_symbol_info.h>
@@ -35,6 +37,7 @@
 #include <cstddef>
 #include <iterator>
 #include <regex>
+#include <unordered_set>
 #include <utility>
 
 // system
@@ -662,24 +665,93 @@ ObjectFile::SearchDebugSymbolStringTable(const std::string &regex) const noexcep
   std::vector<std::string> results{};
 
   for (decltype(it) end; it != end; ++it) {
-    results.push_back((*it).str());
+    const char *strPointer = elf->mDebugStr->GetCString(it->position());
+    results.emplace_back(strPointer);
   }
 
   return results;
 }
 
+auto
+ObjectFile::ForEachTypeMatching(std::string_view pattern, const std::function<void(sym::Type *type)> &onEachType)
+  -> void
+{
+  // Step 1: Search ELF string sections for matching strings using regex
+  std::vector<std::string> matchedStrings = SearchDebugSymbolStringTable(std::string{ pattern });
+
+  // If no matches found in the string table, return early
+  if (matchedStrings.empty()) {
+    return;
+  }
+
+  // Step 2: Search NameIndexShards for each matched string to find DieNameReferences
+  auto *nameIndex = GetNameIndex();
+  std::vector<sym::dw::DieNameReference> dieReferences;
+
+  for (const auto &matchedName : matchedStrings) {
+    nameIndex->ForEachType(
+      matchedName, [&](const sym::dw::DieNameReference &ref) { dieReferences.push_back(ref); });
+  }
+
+  // Step 3: For each DieNameReference, lookup the DIE and check if it's a type
+  auto typeStorage = GetTypeStorage();
+  std::unordered_set<sym::Type *> foundTypes; // Use set to avoid duplicates
+
+  for (const auto &dieRef : dieReferences) {
+    // Get the DIE from the reference
+    auto dieReference = dieRef.cu->GetDieByCacheIndex(dieRef.die_index);
+    const auto *die = dieReference.GetDie();
+
+    if (!die) {
+      continue;
+    }
+
+    // Check if this DIE is a type by examining its tag
+    const auto tag = die->mTag;
+    const bool isType = tag == DwarfTag::DW_TAG_base_type || tag == DwarfTag::DW_TAG_class_type ||
+                        tag == DwarfTag::DW_TAG_structure_type || tag == DwarfTag::DW_TAG_union_type ||
+                        tag == DwarfTag::DW_TAG_enumeration_type || tag == DwarfTag::DW_TAG_typedef ||
+                        tag == DwarfTag::DW_TAG_pointer_type || tag == DwarfTag::DW_TAG_reference_type ||
+                        tag == DwarfTag::DW_TAG_const_type || tag == DwarfTag::DW_TAG_volatile_type ||
+                        tag == DwarfTag::DW_TAG_rvalue_reference_type || tag == DwarfTag::DW_TAG_array_type ||
+                        tag == DwarfTag::DW_TAG_subroutine_type || tag == DwarfTag::DW_TAG_ptr_to_member_type ||
+                        tag == DwarfTag::DW_TAG_set_type || tag == DwarfTag::DW_TAG_subrange_type ||
+                        tag == DwarfTag::DW_TAG_string_type || tag == DwarfTag::DW_TAG_restrict_type ||
+                        tag == DwarfTag::DW_TAG_interface_type || tag == DwarfTag::DW_TAG_unspecified_type ||
+                        tag == DwarfTag::DW_TAG_shared_type || tag == DwarfTag::DW_TAG_atomic_type ||
+                        tag == DwarfTag::DW_TAG_immutable_type || tag == DwarfTag::DW_TAG_packed_type;
+
+    if (!isType) {
+      continue;
+    }
+
+    // Step 4: Lookup the Type* in type storage using the DIE offset
+    const u64 dieOffset = die->mSectionOffset;
+    sym::Type *type = typeStorage->FindTypeByOffset(dieOffset);
+
+    if (type != nullptr) {
+      // Avoid calling the callback multiple times for the same type
+      if (foundTypes.insert(type).second) {
+        // Step 5: Apply the callback on each found type
+        onEachType(type);
+      }
+    }
+  }
+}
+
 /* static */
 std::shared_ptr<ObjectFile>
-ObjectFile::CreateObjectFile(Pid processId, const Path &path) noexcept
+ObjectFile::GetOrCreateObjectFile(const Path &path) noexcept
 {
-  if (!fs::exists(path)) {
-    return nullptr;
+  MDB_ASSERT(fs::exists(path), "File '{}' not found", path.c_str());
+
+  if (auto objectFile = Tracer::LookupSymbolFile(path); objectFile) {
+    return objectFile;
   }
 
   auto fd = mdb::ScopedFd::OpenFileReadOnly(path);
   const auto *addr = fd.MmapFile<u8>({}, true);
-  const auto objfile =
-    std::make_shared<ObjectFile>(std::format("{}:{}", processId, path.c_str()), path, fd.FileSize(), addr);
+  const auto objfile = std::make_shared<ObjectFile>(std::format("{}", path.c_str()), path, fd.FileSize(), addr);
 
   DBGLOG(core, "Parsing objfile {}", objfile->GetPathString());
   auto *header = objfile->AlignedRequiredGetAtOffset<Elf64Header>(0);
@@ -746,6 +818,8 @@ ObjectFile::CreateObjectFile(Pid processId, const Path &path) noexcept
   if (objfile->elf->HasDWARF()) {
     objfile->InitializeDebugSymbolInfo();
   }
+
+  Tracer::CacheObjectFile(objfile);
 
   return objfile;
 }
@@ -881,9 +955,15 @@ SymbolFile::ResolveVariable(
   sym::Type *type = value->EnsureTypeResolved();
   sym::IValueContentsResolver *resolver = GetCustomResolver(*value);
 
+  js::ResolverRegistry *registry = js::Scripting::GetResolverRegistry();
+  resolver = registry->GetResolver(type);
+
+  DBGLOG(core, "Found resolver for type {}: {}", type->mName, (void *)resolver);
+
   if (!resolver) {
     resolver = GetStaticResolver(*value);
   }
+
   if (resolver != nullptr) {
     return resolver->Resolve(ctx, { .start = start, .count = count });
   }
@@ -956,6 +1036,14 @@ SymbolFile::GetTextSection() const noexcept -> const ElfSection *
   return mObjectFile->elf->GetSection(".text");
 }
 
+void
+SymbolFile::ForEachTypeMatching(
+  std::string_view pattern, const std::function<void(sym::Type *type)> &onEachType) const
+{
+  ObjectFile *obj = GetObjectFile();
+  return obj->ForEachTypeMatching(pattern, onEachType);
+}
+
 auto
 SymbolFile::LookupFunctionBreakpointBySpec(const BreakpointSpecification &bpSpec) const noexcept
   -> std::vector<BreakpointLookup>
@@ -964,7 +1052,7 @@ SymbolFile::LookupFunctionBreakpointBySpec(const BreakpointSpecification &bpSpec
   std::vector<MinSymbol> matchingSymbols;
   std::vector<BreakpointLookup> result{};
 
-  auto obj = GetObjectFile();
+  ObjectFile *obj = GetObjectFile();
   std::vector<std::string> searchFor{};
   const auto &spec = *bpSpec.uFunction;
   if (spec.mIsRegex) {

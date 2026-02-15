@@ -44,10 +44,10 @@ struct JsBreakpointFunction
 
 struct JsBreakpoint : public JSBinding<JsBreakpoint, UserBreakpoint, JavascriptClasses::Breakpoint>
 {
-  static auto Id(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
-  static auto Enable(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
-  static auto Disable(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
-  static auto ToString(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Id(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Enable(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Disable(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto ToString(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
 
   static constexpr std::span<const JSCFunctionListEntry>
   PrototypeFunctions() noexcept
@@ -66,8 +66,8 @@ struct JsBreakpoint : public JSBinding<JsBreakpoint, UserBreakpoint, JavascriptC
 struct JsBreakpointEvent
     : public JSBinding<JsBreakpointEvent, BreakpointHitEventResult, JavascriptClasses::BreakpointEvent>
 {
-  static auto Stop(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
-  static auto Retire(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Stop(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Retire(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
 
   static constexpr std ::span<const JSCFunctionListEntry>
   PrototypeFunctions() noexcept

@@ -231,6 +231,8 @@ set(MIDAS_SOURCES
   src/mdbjs/util.h
   src/mdbjs/variablejs.cpp
   src/mdbjs/variablejs.h
+  src/mdbjs/value_resolver_registry.cpp
+  src/mdbjs/value_resolver_registry.h
 )
 
 set(COMMON_SRC src/common.cpp src/common.h src/common/panic.cpp src/common/panic.h)

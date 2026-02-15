@@ -30,11 +30,11 @@ namespace mdb::js {
 
 struct JsFrame : public JSBinding<JsFrame, mdb::FrameLookupHandle, JavascriptClasses::Frame>
 {
-  static auto Id(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
-  static auto Locals(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
-  static auto Arguments(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
-  static auto Caller(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
-  static auto Name(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Id(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Locals(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Arguments(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Caller(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
+  static auto Name(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) -> JSValue;
 
   static constexpr std::span<const JSCFunctionListEntry>
   PrototypeFunctions() noexcept

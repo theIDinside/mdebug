@@ -44,11 +44,30 @@ StackValue::GetPropertyUint32(u32 index) const
   return StackValue::Wrap(mContext, JS_GetPropertyUint32(mContext, mValue, index));
 }
 
+StackValue
+StackValue::GetPropertyString(const char *string) const
+{
+  return Wrap(mContext, JS_GetPropertyStr(mContext, mValue, string));
+}
+
 JSValue
 StackValue::Throw()
 {
+  return Release();
+}
+
+JSValue
+StackValue::Release()
+{
   mContext = nullptr;
   return mValue;
+}
+
+/* static */
+StackValue
+StackValue::GetGlobal(JSContext *cx)
+{
+  return StackValue{ cx, JS_GetGlobalObject(cx) };
 }
 
 /* static */

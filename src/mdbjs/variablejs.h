@@ -10,15 +10,16 @@ namespace mdb::js {
 
 struct JsType : public JSBinding<JsType, sym::Type, JavascriptClasses::Type>
 {
-  static auto Name(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
-  static auto ToString(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto Name(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto ToString(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
   // Returns the number of bytes this type takes up.
-  static auto SizeOf(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto SizeOf(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
   // Look up member with name `name` and return its JsType
-  static auto Member(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto Member(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
   // Return all the members JsType's in an array
-  static auto Members(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
-  static auto ToPrimitive(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto Members(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto ToPrimitive(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto PointeeSize(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
 
   static constexpr std::span<const JSCFunctionListEntry>
   PrototypeFunctions() noexcept
@@ -27,6 +28,7 @@ struct JsType : public JSBinding<JsType, sym::Type, JavascriptClasses::Type>
       FunctionEntry("name", 0, &Name),
       FunctionEntry("toString", 0, &ToString),
       FunctionEntry("sizeOf", 0, &SizeOf),
+      FunctionEntry("pointeeSize", 0, &PointeeSize),
       FunctionEntry("member", 1, &Member),
       FunctionEntry("members", 0, &Members),
       ToStringTag("Type") });
@@ -34,47 +36,47 @@ struct JsType : public JSBinding<JsType, sym::Type, JavascriptClasses::Type>
   }
 
   static constexpr auto
-  DefineToPrimitive(JSContext *context, JSValue prototype, JSAtom toPrimitiveAtom)
+  DefineToPrimitive(JSContext *cx, JSValue prototype, JSAtom toPrimitiveAtom)
   {
     MDB_ASSERT(toPrimitiveAtom != 0, "toPrimitive atom must be passed to function");
-    JSValue func = JS_NewCFunction(context, &ToPrimitive, "[[toPrimitive]]", 1);
-    int rc = JS_DefinePropertyValue(context,
+    JSValue func = JS_NewCFunction(cx, &ToPrimitive, "[[toPrimitive]]", 1);
+    int rc = JS_DefinePropertyValue(cx,
       prototype,
       toPrimitiveAtom,
       func,
       JS_PROP_C_W_E); // Configurable + Writeable + Enumerable
     MDB_ASSERT(rc != -1 && rc > 0, "Defining the toPrimitive property failed.");
-    JS_FreeAtom(context, toPrimitiveAtom);
+    JS_FreeAtom(cx, toPrimitiveAtom);
   }
 };
 
 struct JsVariable : public JSBinding<JsVariable, sym::Value, JavascriptClasses::Variable>
 {
-  static auto Id(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
-  static auto Name(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
-  static auto ToString(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
-  static auto TypeName(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
-  static auto Address(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
-  static auto Dereference(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
-  static auto Bytes(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
-  static auto IsLive(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
-  static auto SetValue(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
-  static auto ToPrimitive(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
-  static auto Type(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
-  static auto Member(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
-  static auto Members(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
-  static auto MemberCount(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto Id(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto Name(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto ToString(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto TypeName(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto Address(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto Dereference(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto Bytes(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto IsLive(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto SetValue(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto ToPrimitive(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto Type(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto Member(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto Members(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto MemberCount(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
 
   // Note, should (in time) turn a type T* to a T[]. If you have a type T* and you want an array of pointers,
   // you need to first promote, to T **, then .asArray -> T*[]
-  static auto AsArray(JSContext *context, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto AsArray(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
 
   /** Gets member variable when user does foo.mMember or foo.value, foo.blah, etc. As such, when user reads
    * property, it uses the get_property functionality in QuickJS. If the backing sym::Type* does not have a member
    * called .bar, we throw an exception because the idea is that the user probably expected to read a type it
    * thought and now it's not having that member, it's better to make noise than silently fail with JS_UNDEFINED.*/
   static auto GetMemberVariable(
-    JSContext *context, JSValueConst thisValue, JSAtom prop, JSValueConst receiverValue) noexcept -> JSValue;
+    JSContext *cx, JSValueConst thisValue, JSAtom prop, JSValueConst receiverValue) noexcept -> JSValue;
 
   static constexpr std::span<const JSCFunctionListEntry>
   PrototypeFunctions() noexcept
@@ -107,17 +109,17 @@ struct JsVariable : public JSBinding<JsVariable, sym::Value, JavascriptClasses::
   }
 
   static constexpr auto
-  DefineToPrimitive(JSContext *context, JSValue prototype, JSAtom toPrimitiveAtom)
+  DefineToPrimitive(JSContext *cx, JSValue prototype, JSAtom toPrimitiveAtom)
   {
     MDB_ASSERT(toPrimitiveAtom != 0, "toPrimitive atom must be passed to function");
-    JSValue func = JS_NewCFunction(context, &ToPrimitive, "[[toPrimitive]]", 1);
-    int rc = JS_DefinePropertyValue(context,
+    JSValue func = JS_NewCFunction(cx, &ToPrimitive, "[[toPrimitive]]", 1);
+    int rc = JS_DefinePropertyValue(cx,
       prototype,
       toPrimitiveAtom,
       func,
       JS_PROP_C_W_E); // Configurable + Writeable + Enumerable
     MDB_ASSERT(rc != -1 && rc > 0, "Defining the toPrimitive property failed.");
-    JS_FreeAtom(context, toPrimitiveAtom);
+    JS_FreeAtom(cx, toPrimitiveAtom);
   }
 };
 

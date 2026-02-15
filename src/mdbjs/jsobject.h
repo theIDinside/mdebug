@@ -2,6 +2,7 @@
 #pragma once
 
 // mdb
+#include <mdbjs/util.h>
 #include <utils/scope_defer.h>
 #include <utils/smartptr.h>
 
@@ -14,9 +15,9 @@
 #include <span>
 
 #define GetThisOrReturnException(variable, msg)                                                                   \
-  GetNative(context, thisValue);                                                                                  \
+  GetNative(cx, thisValue);                                                                                       \
   if (!variable) {                                                                                                \
-    return JS_ThrowTypeError(context, msg);                                                                       \
+    return JS_ThrowTypeError(cx, msg);                                                                            \
   }
 
 #define FOR_EACH_TYPE(EACH_TYPE)                                                                                  \
@@ -231,6 +232,7 @@ template <typename BindingType, typename NativeType, JavascriptClasses ClassId> 
   }
 
 public:
+  JSBinding(JSContext *cx, JSValue value) : mContext(cx), mValue(value) {}
   JSBinding(const JSBinding &) noexcept = delete;
   JSBinding &operator=(const JSBinding &) noexcept = delete;
 
@@ -313,6 +315,13 @@ public:
     return pointer ? static_cast<NativeType *>(pointer) : nullptr;
   }
 
+  template <typename T>
+  static auto
+  CreateBinding(JSContext *cx, T v) -> BindingType
+  {
+    return BindingType{ JSBinding{ cx, CreateValue(cx, v) } };
+  }
+
   // The created object which is used in the javascript code
   static JSValue
   CreateValue(JSContext *context, NativeType *value) noexcept
@@ -363,6 +372,12 @@ public:
     if constexpr (requires { NativeType::DecreaseUseCount(); }) {
       static_cast<LeakedRef<NativeType> *>(ptr)->Drop();
     }
+  }
+
+  constexpr
+  operator JSValue()
+  {
+    return mValue;
   }
 };
 
