@@ -1,5 +1,6 @@
 #pragma once
 
+#include <common.h>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -28,6 +29,12 @@ struct StringHash
   {
     return std::hash<std::string_view>{}(str);
   }
+
+  [[nodiscard]] constexpr size_t
+  operator()(const Path &str) const noexcept
+  {
+    return std::hash<std::string_view>{}(str.c_str());
+  }
 };
 
 // Transparent equality comparator for string types
@@ -54,6 +61,12 @@ struct StringEqual
   }
 
   [[nodiscard]] constexpr bool
+  operator()(std::string_view lhs, const Path &rhs) const noexcept
+  {
+    return lhs == rhs;
+  }
+
+  [[nodiscard]] constexpr bool
   operator()(const std::string &lhs, std::string_view rhs) const noexcept
   {
     return lhs == rhs;
@@ -67,6 +80,12 @@ struct StringEqual
 
   [[nodiscard]] constexpr bool
   operator()(const std::string &lhs, const char *rhs) const noexcept
+  {
+    return lhs == rhs;
+  }
+
+  [[nodiscard]] constexpr bool
+  operator()(const std::string &lhs, const Path &rhs) const noexcept
   {
     return lhs == rhs;
   }
@@ -87,6 +106,12 @@ struct StringEqual
   operator()(const char *lhs, const char *rhs) const noexcept
   {
     return std::string_view(lhs) == std::string_view(rhs);
+  }
+
+  [[nodiscard]] constexpr bool
+  operator()(const char *lhs, const Path &rhs) const noexcept
+  {
+    return std::string_view(lhs) == rhs;
   }
 };
 
