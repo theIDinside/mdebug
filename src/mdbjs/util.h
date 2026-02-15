@@ -1,6 +1,10 @@
 /** LICENSE TEMPLATE */
 #pragma once
 
+// mdb
+#include "common/typedefs.h"
+#include "quickjs.h"
+
 // std
 #include <string_view>
 
@@ -8,6 +12,32 @@ struct JSContext;
 struct JSValue;
 
 namespace mdb::js {
+
+struct StackValue
+{
+  JSContext *mContext;
+  JSValue mValue;
+
+  StackValue(JSContext *cx, JSValue value) noexcept;
+  StackValue(StackValue &&) noexcept;
+  StackValue &operator=(StackValue &&) noexcept;
+  ~StackValue() noexcept;
+
+  StackValue(StackValue &) = delete;
+  StackValue &operator=(const StackValue &) = delete;
+
+  StackValue GetPropertyUint32(u32 index) const;
+
+  JSValue Throw();
+  static StackValue Wrap(JSContext *cx, JSValue value);
+  static StackValue NewUint32(JSContext *cx, u32 value);
+  static StackValue NewInt32(JSContext *cx, int value);
+  static StackValue GetPropertyString(JSContext *cx, JSValue value, const char *string);
+  static StackValue Eval(
+    JSContext *cx, const char *input, size_t inputLength, const char *file, int evalFlags = JS_EVAL_TYPE_GLOBAL);
+
+  operator JSValue &() { return mValue; }
+};
 
 struct QuickJsString
 {
