@@ -258,9 +258,9 @@ public:
   /*
    * Used to end user provided variable resolver (what gdb calls pretty printers)
    */
-  static auto GetCustomResolver(sym::Value &value) noexcept -> sym::IValueContentsResolver *;
   static auto GetStaticResolver(sym::Value &value) noexcept -> sym::IValueContentsResolver *;
-  auto ResolveVariable(const VariableContext &ctx, std::optional<u32> start, std::optional<u32> count) noexcept
+  static auto ResolveVariable(
+    const VariableContext &ctx, std::optional<u32> start, std::optional<u32> count) noexcept
     -> std::vector<Ref<sym::Value>>;
 
   [[nodiscard]] auto LowProgramCounter() const noexcept -> AddrPtr;

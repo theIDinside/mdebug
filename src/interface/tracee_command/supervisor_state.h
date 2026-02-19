@@ -235,7 +235,7 @@ public:
   void EmitStoppedAtBreakpoints(LWP lwp, u32 breakpointId, bool allStopped) noexcept;
   void EmitStepNotification(LWP lwp) noexcept;
   void EmitSteppedStop(LWP lwp, std::string_view message, bool allStopped) noexcept;
-  void EmitSignalEvent(LWP lwp, int signal) noexcept;
+  void EmitSignalEvent(LWP lwp) noexcept;
   void EmitStopped(Tid tid,
     ui::dap::StoppedReason reason,
     std::string_view message,
@@ -313,7 +313,7 @@ public:
   bool HasTask(Tid tid) noexcept;
 
   /* Resumes all tasks in this target. */
-  bool ResumeTarget(tc::RunType type, std::vector<Tid> *resumedThreads = nullptr) noexcept;
+  bool ResumeTarget(tc::RunType type) noexcept;
   /* Resumes `task`, which can involve a process more involved than just calling ptrace. */
   void ResumeTask(TaskInfo &task, tc::RunType type) noexcept;
   /* Interrupts/stops all threads in this process space */

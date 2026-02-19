@@ -16,7 +16,6 @@ class Session final : public SupervisorState
 {
 private: // members
   ReplaySupervisor *mReplaySupervisor;
-  bool mExited{ false };
 
   // Flag for if this process has done any replaying. On fork, a process will be created, but it may not have
   // executed yet.
@@ -35,7 +34,7 @@ private: // methods
 
   rr::ReplayTask *GetReplayTask(Tid recTid) noexcept;
   std::optional<std::string> GetThreadName(Tid tid) noexcept;
-  TaskInfo *CreateNewTask(Tid tid, std::optional<std::string_view> name, bool running) noexcept;
+  TaskInfo *CreateNewTask(Tid tid, std::optional<std::string_view> name) noexcept;
 
 public:
   static Session *Create(ReplaySupervisor *replaySupervisor,

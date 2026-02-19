@@ -9,7 +9,7 @@ StopObserver::send_notifications() noexcept
 {
   DBGLOG(core, "notifying {} messages", notifications.size());
   for (auto &&note : notifications) {
-    note->send();
+    note->Send();
   }
   notifications.clear();
 }
@@ -17,9 +17,9 @@ StopObserver::send_notifications() noexcept
 Step::Step(tc::SupervisorState &tc, int tid, std::string_view msg) noexcept : tc(tc), tid(tid), msg(msg) {}
 
 void
-Step::send() noexcept
+Step::Send() noexcept
 {
-  tc.EmitSteppedStop({ tc.TaskLeaderTid(), tid }, msg, true);
+  tc.EmitSteppedStop({ .pid = tc.TaskLeaderTid(), .tid = tid }, msg, true);
 }
 
 BreakpointHit::BreakpointHit(tc::SupervisorState &tc, int bp_id, int tid) noexcept : tc(tc), bp_id(bp_id), tid(tid)
@@ -27,17 +27,17 @@ BreakpointHit::BreakpointHit(tc::SupervisorState &tc, int bp_id, int tid) noexce
 }
 
 void
-BreakpointHit::send() noexcept
+BreakpointHit::Send() noexcept
 {
   tc.EmitStoppedAtBreakpoints({ .pid = tc.TaskLeaderTid(), .tid = tid }, bp_id, true);
 }
 
-SignalStop::SignalStop(tc::SupervisorState &tc, int signal, int tid) noexcept : tc(tc), signal(signal), tid(tid) {}
+SignalStop::SignalStop(tc::SupervisorState &supervisor, int tid) noexcept : mSupervisor(supervisor), mTid(tid) {}
 
 void
-SignalStop::send() noexcept
+SignalStop::Send() noexcept
 {
-  tc.EmitSignalEvent({ .pid = tc.TaskLeaderTid(), .tid = tid }, signal);
+  mSupervisor.EmitSignalEvent({ .pid = mSupervisor.TaskLeaderTid(), .tid = mTid });
 }
 } // namespace mdb
 

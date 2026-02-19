@@ -43,100 +43,14 @@
 // system
 #include <elf.h>
 #include <immintrin.h>
-static std::string_view
-DynamicEntryTagToString(Elf64_Sxword value)
-{
-  switch (value) {
-  case DT_NULL:
-    return "DT_NULL";
-  case DT_NEEDED:
-    return "DT_NEEDED";
-  case DT_PLTRELSZ:
-    return "DT_PLTRELSZ";
-  case DT_PLTGOT:
-    return "DT_PLTGOT";
-  case DT_HASH:
-    return "DT_HASH";
-  case DT_STRTAB:
-    return "DT_STRTAB";
-  case DT_SYMTAB:
-    return "DT_SYMTAB";
-  case DT_RELA:
-    return "DT_RELA";
-  case DT_RELASZ:
-    return "DT_RELASZ";
-  case DT_RELAENT:
-    return "DT_RELAENT";
-  case DT_STRSZ:
-    return "DT_STRSZ";
-  case DT_SYMENT:
-    return "DT_SYMENT";
-  case DT_INIT:
-    return "DT_INIT";
-  case DT_FINI:
-    return "DT_FINI";
-  case DT_SONAME:
-    return "DT_SONAME";
-  case DT_RPATH:
-    return "DT_RPATH";
-  case DT_SYMBOLIC:
-    return "DT_SYMBOLIC";
-  case DT_REL:
-    return "DT_REL";
-  case DT_RELSZ:
-    return "DT_RELSZ";
-  case DT_RELENT:
-    return "DT_RELENT";
-  case DT_PLTREL:
-    return "DT_PLTREL";
-  case DT_DEBUG:
-    return "DT_DEBUG";
-  case DT_TEXTREL:
-    return "DT_TEXTREL";
-  case DT_JMPREL:
-    return "DT_JMPREL";
-  case DT_BIND_NOW:
-    return "DT_BIND_NOW";
-  case DT_INIT_ARRAY:
-    return "DT_INIT_ARRAY";
-  case DT_FINI_ARRAY:
-    return "DT_FINI_ARRAY";
-  case DT_INIT_ARRAYSZ:
-    return "DT_INIT_ARRAYSZ";
-  case DT_FINI_ARRAYSZ:
-    return "DT_FINI_ARRAYSZ";
-  case DT_RUNPATH:
-    return "DT_RUNPATH";
-  case DT_FLAGS:
-    return "DT_FLAGS";
-  case DT_ENCODING:
-    return "DT_ENCODING | DT_PREINIT_ARRAY";
-    //  case DT_PREINIT_ARRAY: return "DT_PREINIT_ARRAY";
-  case DT_PREINIT_ARRAYSZ:
-    return "DT_PREINIT_ARRAYSZ";
-  case DT_SYMTAB_SHNDX:
-    return "DT_SYMTAB_SHNDX";
-  case DT_RELRSZ:
-    return "DT_RELRSZ";
-  case DT_RELR:
-    return "DT_RELR";
-  case DT_RELRENT:
-    return "DT_RELRENT";
-  case DT_NUM:
-    return "DT_NUM";
-  }
-  return "Not supported dynamic entry type";
-}
 
 namespace mdb {
 template <typename T> using Set = std::unordered_set<T>;
 
 ObjectFile::ObjectFile(std::string objfile_id, Path p, u64 size, const u8 *loaded_binary) noexcept
     : mObjectFilePath(std::move(p)), mObjectFileId(std::move(objfile_id)), mSize(size),
-      mLoadedBinary(loaded_binary), mTypeStorage(TypeStorage::Create()), mMinimalFunctionSymbols{},
-      mMinimalFunctionSymbolsSorted(), mMinimalObjectSymbols{}, mUnitDataWriteLock(), mCompileUnits(),
-      mNameToDieIndex(std::make_unique<sym::dw::ObjectFileNameIndex>()), mCompileUnitWriteLock(),
-      mCompilationUnits(), mAddressToCompileUnitMapping()
+      mLoadedBinary(loaded_binary), mTypeStorage(TypeStorage::Create()),
+      mNameToDieIndex(std::make_unique<sym::dw::ObjectFileNameIndex>())
 {
   MDB_ASSERT(size > 0, "Loaded Object File is invalid");
 }
@@ -960,13 +874,6 @@ SymbolFile::GetCompilationUnits(AddrPtr pc) const noexcept -> std::vector<sym::C
 }
 
 /* static */
-auto
-SymbolFile::GetCustomResolver(sym::Value &value) noexcept -> sym::IValueContentsResolver *
-{
-  return nullptr;
-}
-
-/* static */
 sym::IValueContentsResolver *
 SymbolFile::GetStaticResolver(sym::Value &value) noexcept
 {
@@ -993,6 +900,7 @@ SymbolFile::GetStaticResolver(sym::Value &value) noexcept
   return nullptr;
 }
 
+// static
 auto
 SymbolFile::ResolveVariable(
   const VariableContext &ctx, std::optional<u32> start, std::optional<u32> count) noexcept
@@ -1005,10 +913,9 @@ SymbolFile::ResolveVariable(
   }
 
   sym::Type *type = value->EnsureTypeResolved()->SkipJunk();
-  sym::IValueContentsResolver *resolver = GetCustomResolver(*value);
 
   js::ResolverRegistry *registry = js::Scripting::GetResolverRegistry();
-  resolver = registry->GetResolver(type);
+  sym::IValueContentsResolver *resolver = registry->GetResolver(type);
 
   if (!resolver) {
     resolver = GetStaticResolver(*value);

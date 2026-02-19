@@ -309,9 +309,8 @@ class InternalBreakpoint : public UserBreakpoint
   std::function<BreakpointHitEventResult()> mMaintenanceFn;
 
 public:
-  explicit InternalBreakpoint(RequiredUserParameters param,
-    std::string_view debugName,
-    std::function<BreakpointHitEventResult()> maintenanceFunc) noexcept;
+  explicit InternalBreakpoint(
+    RequiredUserParameters param, std::function<BreakpointHitEventResult()> maintenanceFunc) noexcept;
   BreakpointHitEventResult OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept final;
 };
 

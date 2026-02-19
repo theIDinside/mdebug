@@ -43,7 +43,7 @@ Session::GetThreadName(Tid tid) noexcept
 }
 
 TaskInfo *
-Session::CreateNewTask(Tid tid, std::optional<std::string_view> name, bool running) noexcept
+Session::CreateNewTask(Tid tid, std::optional<std::string_view> name) noexcept
 {
   DBGLOG(core, "Create new task {}", tid);
   if (auto *t = Tracer::GetSessionTaskMap().Get(tid)) {
@@ -85,7 +85,7 @@ Session::Create(ReplaySupervisor *replaySupervisor,
   auto *ptr = Tracer::AddSupervisor(std::move(supervisor));
   replaySupervisor->AddSupervisor({ ptr });
 
-  auto t = ptr->CreateNewTask(taskLeader, replaySupervisor->ExecedFile(taskLeader), false);
+  TaskInfo *t = ptr->CreateNewTask(taskLeader, replaySupervisor->ExecedFile(taskLeader));
   t->SetTimestampCreated(replaySupervisor->CurrentFrameTime());
 
   return ptr;
@@ -101,7 +101,6 @@ void
 Session::StoppedDuringReverse() noexcept
 {
   const auto time = mReplaySupervisor->CurrentFrameTime();
-  auto i = 0;
   for (auto &entry : mThreads) {
     if (entry.mTask->StartTime() > time) {
       entry.mTask->Invalidate();
@@ -195,13 +194,10 @@ Session::HandleEvent(const ReplayEvent &evt) noexcept
     return HandleEventInReverse(evt);
   }
 
-  auto task = GetTaskByTid(evt.mTaskInfo.mRecTid);
+  TaskInfo *task = GetTaskByTid(evt.mTaskInfo.mRecTid);
   task->SetValueLiveness(Tracer::GetCurrentVariableReferenceBoundary());
 
-  bool steppedOverBreakpoint = false;
-
   if (task->mBreakpointLocationStatus.mBreakpointLocation && task->mBreakpointLocationStatus.mIsSteppingOver) {
-    steppedOverBreakpoint = true;
     task->mBreakpointLocationStatus.mBreakpointLocation->Enable(task->mTid, *this);
     // Clear breakpoint location status. The existence of this value, means the task needs to step over a
     // breakpoint. Since we've established that we've stepped over one here, we need to clear the loc status, so
@@ -249,8 +245,9 @@ Session::HandleEvent(const ReplayEvent &evt) noexcept
   } break;
   case StopKind::Cloned: {
     auto threadName = GetThreadName(evt.mTaskInfo.mNewTaskIfAny);
-    CreateNewTask(evt.mTaskInfo.mNewTaskIfAny, threadName.value_or("thread"), false);
-    mScheduler->ReplaySchedule(*task, { true, task->mResumeRequest.mType });
+    CreateNewTask(evt.mTaskInfo.mNewTaskIfAny, threadName.value_or("thread"));
+    mScheduler->ReplaySchedule(
+      *task, { .mShouldResumeAfterProcessing = true, .mResumeType = task->mResumeRequest.mType });
   } break;
   case StopKind::Signalled: {
     DBGLOG(core, "Signalled with signal {}", evt.mTaskInfo.mSignal);
@@ -350,7 +347,7 @@ Session::AdjustSymbols() noexcept
   auto count = sect->GetDataAs<Elf64_Dyn>().size();
   std::vector<Elf64_Dyn> mappedEntries{ count };
   // slow read. who cares. but change to something better when there's literally nothing else to do.
-  const auto bytesRead = ReadIntoVector(dynamicSegment, count, mappedEntries);
+  (void)ReadIntoVector(dynamicSegment, count, mappedEntries);
   for (const auto &entry : mappedEntries) {
     if (entry.d_tag == DT_DEBUG) {
       auto rDebug = ReadType(TPtr<r_debug>{ entry.d_un.d_val });
@@ -420,7 +417,7 @@ Session::HandleFork(TaskInfo &parentTask, pid_t child, bool vFork) noexcept
     copyAndClear(specs, [this, &source](const auto &add) { UpdateSourceBreakpoints(source, add, {}); });
   }
 
-  newSupervisor->CreateNewTask(child, "forked", false);
+  newSupervisor->CreateNewTask(child, "forked");
   if (vFork) {
     TODO("Implement vFork for rr replay sessions");
   }
@@ -431,10 +428,10 @@ Session::HandleFork(TaskInfo &parentTask, pid_t child, bool vFork) noexcept
 mdb::Expected<Auxv, Error>
 Session::DoReadAuxiliaryVector() noexcept
 {
-  auto auxv = mReplaySupervisor->GetAuxv(mTaskLeader);
+  std::vector<uint8_t> auxv = mReplaySupervisor->GetAuxv(mTaskLeader);
   Auxv result{};
   result.mContents.reserve(auxv.size() / (8 * 2));
-  for (auto i = 0; i < auxv.size(); i += 16) {
+  for (size_t i = 0; i < auxv.size(); i += 16) {
     uint64_t value{};
     uint64_t key{};
     std::memcpy(&key, auxv.data() + i, 8);
@@ -681,9 +678,8 @@ Session::SetInstructionBreakpoints(const Set<BreakpointSpecification> &breakpoin
   }
 
   // Actually apply breakpoint specs
-  mReplaySupervisor->IterateSupervisors([&add, &remove, &sessionBreakpoints](Session *session) {
-    session->UpdateInstructionBreakpoints(add, remove);
-  });
+  mReplaySupervisor->IterateSupervisors(
+    [&add, &remove](Session *session) { session->UpdateInstructionBreakpoints(add, remove); });
 }
 
 void
@@ -701,7 +697,6 @@ Session::SetFunctionBreakpoints(const Set<BreakpointSpecification> &breakpoints)
     }
   }
 
-  std::hash<BreakpointSpecification> specHasher{};
   for (const auto &b : breakpoints) {
     if (sessionBreakpoints.TryInitNewFunctionSpec(b)) {
       add.push_back(b);
@@ -804,10 +799,11 @@ Session::OnErase() noexcept
 }
 
 TaskExecuteResponse
-Session::ReadRegisters(TaskInfo &t) noexcept
+Session::ReadRegisters([[maybe_unused]] TaskInfo &t) noexcept
 {
   // We don't need to read registers here at all (I believe). Because RR will have fetched this for us.
-  auto task = mReplaySupervisor->GetTask(t.mTid);
+#ifdef DEBUG
+  auto *task = mReplaySupervisor->GetTask(t.mTid);
   MDB_ASSERT(task, "No task by that id: {}", t.mTid);
   auto userRegs = task->regs().get_ptrace();
   DBGBUFLOG(core,
@@ -816,18 +812,23 @@ Session::ReadRegisters(TaskInfo &t) noexcept
     userRegs.rip,
     userRegs.rsp,
     userRegs.rax);
+#endif
   return TaskExecuteResponse::Ok();
 }
 
 TaskExecuteResponse
-Session::WriteRegisters(TaskInfo &t, void *data, size_t length) noexcept
+Session::WriteRegisters(
+  [[maybe_unused]] TaskInfo &t, [[maybe_unused]] void *data, [[maybe_unused]] size_t length) noexcept
 {
   // Diversion sessions not supported (and may never be supported.)
   return TaskExecuteResponse::Error(-1);
 }
 
 TaskExecuteResponse
-Session::SetRegister(TaskInfo &t, size_t registerNumber, void *data, size_t length) noexcept
+Session::SetRegister([[maybe_unused]] TaskInfo &t,
+  [[maybe_unused]] size_t registerNumber,
+  [[maybe_unused]] void *data,
+  [[maybe_unused]] size_t length) noexcept
 {
   return TaskExecuteResponse::Error(-1);
 }
@@ -843,7 +844,7 @@ Session::GetUserRegister(const TaskInfo &t, size_t registerNumber) noexcept
 }
 
 TaskExecuteResponse
-Session::DoDisconnect(bool terminate) noexcept
+Session::DoDisconnect([[maybe_unused]] bool terminate) noexcept
 {
   mReplaySupervisor->Shutdown();
   return TaskExecuteResponse::Ok();
@@ -862,7 +863,8 @@ Session::DoReadBytes(AddrPtr address, u64 size, u8 *readBuffer) noexcept
 }
 
 TraceeWriteResult
-Session::DoWriteBytes(AddrPtr addr, const u8 *buf, u64 size) noexcept
+Session::DoWriteBytes(
+  [[maybe_unused]] AddrPtr addr, [[maybe_unused]] const u8 *buf, [[maybe_unused]] u64 size) noexcept
 {
   TODO("Session::DoWriteBytes(AddrPtr addr, const u8 *buf, u32 size) noexcept");
 }
@@ -890,7 +892,7 @@ Session::DisableBreakpoint(Tid tid, BreakpointLocation &location) noexcept
 }
 
 TaskExecuteResponse
-Session::StopTask(TaskInfo &t) noexcept
+Session::StopTask([[maybe_unused]] TaskInfo &t) noexcept
 {
   // Supervisor does single threaded execution, interrupting all is interrupting `t`
   mReplaySupervisor->RequestInterrupt(mTaskLeader);
@@ -901,11 +903,11 @@ void
 Session::DoResumeTask(TaskInfo &t, RunType runType) noexcept
 {
   DBGLOG(core, "Attempting to resume task {}, type=", t.mTid, runType);
-  mdbrr::ResumeReplay resumeReplay{ .resume_type = mdbrr::ResumeType::RR_RESUME,
-    .direction = mdbrr::ReplayDirection::RR_DIR_FORWARD };
+  mdbrr::ResumeReplay resumeReplay{
+    .resume_type = mdbrr::ResumeType::RR_RESUME, .direction = mdbrr::ReplayDirection::RR_DIR_FORWARD, .steps = 1
+  };
   if (runType == RunType::Step) [[unlikely]] {
     resumeReplay.resume_type = mdbrr::ResumeType::RR_STEP;
-    resumeReplay.steps = 1;
   }
 
   mReplaySupervisor->RequestResume(resumeReplay);
@@ -914,8 +916,9 @@ Session::DoResumeTask(TaskInfo &t, RunType runType) noexcept
 bool
 Session::DoResumeTarget(RunType runType) noexcept
 {
-  mdbrr::ResumeReplay resumeReplay{ .resume_type = mdbrr::ResumeType::RR_RESUME,
-    .direction = mdbrr::ReplayDirection::RR_DIR_FORWARD };
+  mdbrr::ResumeReplay resumeReplay{
+    .resume_type = mdbrr::ResumeType::RR_RESUME, .direction = mdbrr::ReplayDirection::RR_DIR_FORWARD, .steps = 1
+  };
   if (runType == RunType::Step) [[unlikely]] {
     resumeReplay.resume_type = mdbrr::ResumeType::RR_STEP;
   }
@@ -937,30 +940,27 @@ Session::DoResumeTarget(RunType runType) noexcept
 bool
 Session::ReverseResumeTarget(tc::RunType runType) noexcept
 {
-  mdbrr::ResumeReplay resumeReplay{ .resume_type = mdbrr::ResumeType::RR_RESUME,
-    .direction = mdbrr::ReplayDirection::RR_DIR_REVERSE };
+  mdbrr::ResumeReplay resumeReplay{
+    .resume_type = mdbrr::ResumeType::RR_RESUME, .direction = mdbrr::ReplayDirection::RR_DIR_REVERSE, .steps = 1
+  };
 
   if (runType == RunType::Step) [[unlikely]] {
     resumeReplay.resume_type = mdbrr::ResumeType::RR_STEP;
   }
 
   bool ok = mReplaySupervisor->RequestResume(resumeReplay);
-  if (!ok) {
-    return false;
-  }
-  return true;
+  return ok;
 }
 
 bool
 Session::Pause(Tid tid) noexcept
 {
   if (!mReplaySupervisor->IsReplaying()) {
-    auto pid = mReplaySupervisor->GetTaskToResume();
     mDebugAdapterClient->PostDapEvent(
       CreateStoppedEvent(ui::dap::StoppedReason::Pause, "Paused", tid, "Paused all", true, {}));
     return true;
   }
-  auto task = GetTaskByTid(tid);
+  auto *task = GetTaskByTid(tid);
   if (task->IsStopped()) {
     return false;
   }
@@ -983,17 +983,6 @@ Session::CreateStoppedEvent(ui::dap::StoppedReason reason,
 
   event->SetExistingProcesses(mReplaySupervisor->CurrentLiveProcesses());
   return event;
-}
-
-static TaskInfo *
-GetCachedTask(Tid tid, std::vector<TaskInfoEntry> &entries)
-{
-  for (const auto &entry : entries) {
-    if (entry.mTid == tid) {
-      return entry.mTask;
-    }
-  }
-  return nullptr;
 }
 
 } // namespace mdb::tc::replay

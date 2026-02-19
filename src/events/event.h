@@ -25,14 +25,14 @@ class StopEventNotification
 {
 public:
   virtual ~StopEventNotification() = default;
-  virtual void send() noexcept = 0;
+  virtual void Send() noexcept = 0;
 };
 
 class Step : public StopEventNotification
 {
 public:
   explicit Step(tc::SupervisorState &tc, int tid, std::string_view msg) noexcept;
-  void send() noexcept override;
+  void Send() noexcept override;
 
 private:
   tc::SupervisorState &tc;
@@ -44,7 +44,7 @@ class BreakpointHit : public StopEventNotification
 {
 public:
   explicit BreakpointHit(tc::SupervisorState &tc, int bp_id, int tid) noexcept;
-  void send() noexcept override;
+  void Send() noexcept override;
 
 private:
   tc::SupervisorState &tc;
@@ -55,13 +55,12 @@ private:
 class SignalStop : public StopEventNotification
 {
 public:
-  SignalStop(tc::SupervisorState &tc, int signal, int tid) noexcept;
-  void send() noexcept override;
+  SignalStop(tc::SupervisorState &supervisor, int tid) noexcept;
+  void Send() noexcept override;
 
 private:
-  tc::SupervisorState &tc;
-  int signal;
-  int tid;
+  tc::SupervisorState &mSupervisor;
+  int mTid;
 };
 
 class StopObserver

@@ -111,7 +111,7 @@ JsType::Members(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)
 }
 
 /* static */ auto
-JsType::ToPrimitive(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue
+JsType::ToPrimitive(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept -> JSValue
 {
   sym::Type *type = GetThisOrReturnException(type, kTypeBindingDataError);
 
@@ -196,8 +196,6 @@ JsVariable::Address(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, a
 JsVariable::Dereference(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   sym::Value *value = GetThisOrReturnException(value, kBindingDataError);
-  auto pointeeAddr = value->ToRemotePointer();
-
   u32 derefCount = 1;
 
   if (argCount > 0) {
@@ -417,7 +415,7 @@ JsVariable::ToPrimitive(JSContext *cx, JSValue thisValue, int argCount, JSValue 
 }
 
 /* static */ JSValue
-JsVariable::Type(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept
+JsVariable::Type(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   auto *value = GetThisOrReturnException(value, "Could not read sym::Value");
   return JsType::CreateValue(cx, value->GetType());
@@ -447,7 +445,7 @@ JsVariable::Member(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv
 }
 
 /* static */ JSValue
-JsVariable::Members(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept
+JsVariable::Members(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   sym::Value *pointer = GetThisOrReturnException(pointer, kBindingDataError);
   JSValue array = JS_NewArray(cx);
@@ -464,7 +462,7 @@ JsVariable::Members(JSContext *cx, JSValue thisValue, int argCount, JSValue *arg
 }
 
 /* static */ JSValue
-JsVariable::MemberCount(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept
+JsVariable::MemberCount(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   sym::Value *pointer = GetThisOrReturnException(pointer, kBindingDataError);
   const size_t count = pointer->EnsureTypeResolved()->MemberFields().size();

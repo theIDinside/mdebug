@@ -81,10 +81,8 @@ class DebugAdapterSerializer
 {
 public:
   // TODO(simon): add optimization where we can format our value directly to an outbuf?
-  virtual std::optional<std::pmr::string> Serialize(const Value &value,
-    std::string_view name,
-    u64 variablesReference,
-    std::pmr::memory_resource *allocator) noexcept = 0;
+  virtual std::optional<std::pmr::string> SerializeVariable(
+    const Value &value, std::pmr::memory_resource *allocator) noexcept = 0;
 
   [[nodiscard]] virtual std::string_view SerializerType() const = 0;
 };
@@ -96,10 +94,8 @@ class PrimitiveSerializer final : public DebugAdapterSerializer
     Type &t, std::span<const u8> span, std::pmr::memory_resource *allocator) noexcept;
 
 public:
-  std::optional<std::pmr::string> Serialize(const Value &value,
-    std::string_view name,
-    u64 variablesReference,
-    std::pmr::memory_resource *allocator) noexcept final;
+  std::optional<std::pmr::string> SerializeVariable(
+    const Value &value, std::pmr::memory_resource *allocator) noexcept final;
 
   [[nodiscard]] std::string_view
   SerializerType() const override
@@ -112,10 +108,8 @@ class DefaultStructSerializer final : public DebugAdapterSerializer
 {
 public:
   // TODO(simon): add optimization where we can format our value directly to an outbuf?
-  std::optional<std::pmr::string> Serialize(const Value &value,
-    std::string_view name,
-    u64 variablesReference,
-    std::pmr::memory_resource *allocator) noexcept final;
+  std::optional<std::pmr::string> SerializeVariable(
+    const Value &value, std::pmr::memory_resource *allocator) noexcept final;
   [[nodiscard]] std::string_view
   SerializerType() const override
   {
@@ -126,10 +120,8 @@ public:
 class InvalidValueSerializer final : public DebugAdapterSerializer
 {
 public:
-  std::optional<std::pmr::string> Serialize(const Value &value,
-    std::string_view name,
-    u64 variablesReference,
-    std::pmr::memory_resource *allocator) noexcept final;
+  std::optional<std::pmr::string> SerializeVariable(
+    const Value &value, std::pmr::memory_resource *allocator) noexcept final;
 
   [[nodiscard]] std::string_view
   SerializerType() const override
@@ -141,10 +133,8 @@ public:
 class ArraySerializer final : public DebugAdapterSerializer
 {
 public:
-  std::optional<std::pmr::string> Serialize(const Value &value,
-    std::string_view name,
-    u64 variablesReference,
-    std::pmr::memory_resource *allocator) noexcept final;
+  std::optional<std::pmr::string> SerializeVariable(
+    const Value &value, std::pmr::memory_resource *allocator) noexcept final;
 
   [[nodiscard]] std::string_view
   SerializerType() const override
@@ -159,10 +149,8 @@ class CStringSerializer final : public DebugAdapterSerializer
     const Value &value, std::optional<u32> nullTerminator, std::pmr::memory_resource *allocator) noexcept;
 
 public:
-  std::optional<std::pmr::string> Serialize(const Value &value,
-    std::string_view name,
-    u64 variablesReference,
-    std::pmr::memory_resource *allocator) noexcept final;
+  std::optional<std::pmr::string> SerializeVariable(
+    const Value &value, std::pmr::memory_resource *allocator) noexcept final;
 
   [[nodiscard]] std::string_view
   SerializerType() const override

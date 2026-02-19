@@ -100,9 +100,9 @@ Scripting::Scripting(JSRuntime *runtime, JSContext *context) noexcept
 }
 
 /* static */ JSValue
-Scripting::GetSupervisor(JSContext *ctx, JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
+Scripting::GetSupervisor(JSContext *cx, JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
 {
-  (void)ctx;
+  (void)cx;
   (void)thisValue;
   (void)argCount;
   (void)argv;
@@ -110,28 +110,29 @@ Scripting::GetSupervisor(JSContext *ctx, JSValueConst thisValue, int argCount, J
 }
 
 /* static */ JSValue
-Scripting::GetSupervisors(JSContext *ctx, JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
+Scripting::GetSupervisors(
+  JSContext *cx, [[maybe_unused]] JSValueConst thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
-  auto arrayValue = JS_NewArray(ctx);
+  auto arrayValue = JS_NewArray(cx);
 
   auto index = 0;
   const auto procs = Tracer::Get().GetAllProcesses();
-  for (auto supervisor : procs) {
-    auto supervisorValue = JsSupervisor::CreateValue(ctx, supervisor);
-    JS_SetPropertyUint32(ctx, arrayValue, index++, supervisorValue);
+  for (tc::SupervisorState *supervisor : procs) {
+    auto supervisorValue = JsSupervisor::CreateValue(cx, supervisor);
+    JS_SetPropertyUint32(cx, arrayValue, index++, supervisorValue);
   }
 
   return arrayValue;
 }
 
 /* static */ JSValue
-Scripting::Log(JSContext *ctx, [[maybe_unused]] JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
+Scripting::Log(JSContext *cx, [[maybe_unused]] JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
 {
   if (argCount < 1) {
     return JS_UNDEFINED;
   }
   if (JS_IsString(argv[0])) {
-    QuickJsString string = QuickJsString::FromValue(ctx, argv[0]);
+    QuickJsString string = QuickJsString::FromValue(cx, argv[0]);
     DBGLOG_STR(interpreter, string.mString);
   } else {
     DBGLOG(warning, "Discarding parameter to log. It must be a string.");
@@ -141,15 +142,15 @@ Scripting::Log(JSContext *ctx, [[maybe_unused]] JSValueConst thisValue, int argC
 
 /* static */ JSValue
 Scripting::GetTask(
-  JSContext *ctx, [[maybe_unused]] JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
+  JSContext *cx, [[maybe_unused]] JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
 {
   if (argCount < 0 || !JS_IsNumber(argv[0])) {
-    return JS_ThrowTypeError(ctx, Scripting::HelpMessage("getThread").data());
+    return JS_ThrowTypeError(cx, Scripting::HelpMessage("getThread").data());
   }
 
   i32 tid = -1;
-  if (JS_ToInt32(ctx, &tid, argv[0])) {
-    return JS_ThrowTypeError(ctx, "number conversion failed.");
+  if (JS_ToInt32(cx, &tid, argv[0])) {
+    return JS_ThrowTypeError(cx, "number conversion failed.");
   }
 
   auto taskInfo = Tracer::GetThreadByTidOrDebugId(tid);
@@ -157,20 +158,20 @@ Scripting::GetTask(
     JS_UNDEFINED;
   }
 
-  return JsTaskInfo::CreateValue(ctx, taskInfo);
+  return JsTaskInfo::CreateValue(cx, taskInfo);
 }
 
 /* static */
 JSValue
 Scripting::GetThreads(
-  JSContext *ctx, [[maybe_unused]] JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
+  JSContext *cx, [[maybe_unused]] JSValueConst thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
-  auto value = JS_NewArray(ctx);
+  JSValueConst value = JS_NewArray(cx);
 
   auto index = 0;
   for (auto &[id, thread] : Tracer::GetSessionTaskMap().AllThreads()) {
-    auto task = JsTaskInfo::CreateValue(ctx, thread);
-    JS_SetPropertyUint32(ctx, value, index++, task);
+    auto task = JsTaskInfo::CreateValue(cx, thread);
+    JS_SetPropertyUint32(cx, value, index++, task);
   }
 
   return value;
@@ -178,7 +179,7 @@ Scripting::GetThreads(
 
 /* static */ JSValue
 Scripting::PrintThreads(
-  JSContext *ctx, [[maybe_unused]] JSValueConst thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
+  JSContext *cx, [[maybe_unused]] JSValueConst thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   auto scopedTemporary = sInstance->mBumpAllocator->ScopeAllocation();
 
@@ -186,7 +187,7 @@ Scripting::PrintThreads(
   buffer.reserve(4096);
 
   auto iterator = std::back_inserter(buffer);
-  for (auto supervisor : Tracer::Get().GetAllProcesses()) {
+  for (auto *supervisor : Tracer::Get().GetAllProcesses()) {
     iterator = ToString(iterator, supervisor);
     *iterator++ = '\n';
 
@@ -197,33 +198,33 @@ Scripting::PrintThreads(
     iterator = std::format_to(iterator, "----------\n");
   }
 
-  auto v = JS_NewStringLen(ctx, buffer.data(), buffer.size());
+  auto v = JS_NewStringLen(cx, buffer.data(), buffer.size());
   return v;
 }
 
 /* static */ JSValue
 Scripting::PrintProcesses(
-  JSContext *ctx, [[maybe_unused]] JSValueConst thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
+  JSContext *cx, [[maybe_unused]] JSValueConst thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   auto scopedTemporary = sInstance->mBumpAllocator->ScopeAllocation();
   std::pmr::string buffer{ scopedTemporary.GetAllocator() };
   buffer.reserve(4096);
 
   auto iterator = std::back_inserter(buffer);
-  for (auto supervisor : Tracer::Get().GetAllProcesses()) {
+  for (auto *supervisor : Tracer::Get().GetAllProcesses()) {
     iterator = ToString(iterator, supervisor);
     *iterator++ = '\n';
   }
 
-  auto v = JS_NewStringLen(ctx, buffer.data(), buffer.size());
+  auto v = JS_NewStringLen(cx, buffer.data(), buffer.size());
   return v;
 }
 
 /* static */ JSValue
-Scripting::Help(JSContext *ctx, [[maybe_unused]] JSValueConst thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
+Scripting::Help(JSContext *cx, [[maybe_unused]] JSValueConst thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   auto msg = HelpMessage();
-  return JS_NewStringLen(ctx, msg.data(), msg.size());
+  return JS_NewStringLen(cx, msg.data(), msg.size());
 }
 
 /* static */ JSValue
@@ -399,24 +400,15 @@ Scripting::ReplEvaluate(Allocator *allocator, std::string_view input) noexcept
 {
   std::pmr::string *res = allocator->new_object<std::pmr::string>();
 
-  JSValue evalRes = JS_Eval(mContext, input.data(), input.size(), "<eval>", 0);
-
-  auto jsString = JS_ToString(mContext, evalRes);
+  StackValue evalRes = StackValue::Eval(mContext, input.data(), input.size(), "<eval>", 0);
   if (JS_IsException(evalRes)) {
     ExceptionToPrintableOutput(*res);
     return res;
   }
-  auto string = JS_ToCString(mContext, jsString);
 
-  ScopedDefer defer{ [&]() {
-    JS_FreeValue(mContext, jsString);
-    JS_FreeCString(mContext, string);
-    JS_FreeValue(mContext, evalRes);
-  } };
-
-  std::string_view view{ string };
-
-  CopyTo(view, *res);
+  StackValue jsString = evalRes.ToString();
+  const auto string = QuickJsString::FromValue(mContext, jsString);
+  CopyTo(string.mString, *res);
 
   return res;
 }

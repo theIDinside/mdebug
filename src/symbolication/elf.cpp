@@ -137,7 +137,7 @@ SectionName(ElfSec ident) noexcept
   NEVER("Unknown elf section identifier");
 }
 
-constexpr const ElfSection *
+const ElfSection *
 Elf::GetSection(ElfSec section) const noexcept
 {
   return GetSection(SectionName(section));

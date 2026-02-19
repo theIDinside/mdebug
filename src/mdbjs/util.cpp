@@ -65,6 +65,19 @@ StackValue::Release()
 
 /* static */
 StackValue
+StackValue::ToString(JSContext *cx, JSValue value)
+{
+  return StackValue{ cx, JS_ToString(cx, value) };
+}
+
+StackValue
+StackValue::ToString() const
+{
+  return ToString(mContext, mValue);
+}
+
+/* static */
+StackValue
 StackValue::GetGlobal(JSContext *cx)
 {
   return StackValue{ cx, JS_GetGlobalObject(cx) };

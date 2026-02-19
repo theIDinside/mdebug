@@ -113,7 +113,7 @@ JsBreakpoint::Disable(JSContext *cx, [[maybe_unused]] JSValue thisValue, JS_UNUS
 };
 
 auto
-JsBreakpoint::ToString(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) -> JSValue
+JsBreakpoint::ToString(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) -> JSValue
 {
   auto pointer = GetThisOrReturnException(pointer, "Invalid breakpoint!");
   Ref<BreakpointLocation> bpLoc = pointer->GetLocation();

@@ -334,10 +334,8 @@ PrimitiveSerializer::FormatValue(const Value &value, std::pmr::memory_resource *
 }
 
 std::optional<std::pmr::string>
-PrimitiveSerializer::Serialize(
-  const Value &value, std::string_view name, u64 variablesReference, std::pmr::memory_resource *allocator) noexcept
+PrimitiveSerializer::SerializeVariable(const Value &value, std::pmr::memory_resource *allocator) noexcept
 {
-  MDB_ASSERT(name == value.mName, "variable name {} != provided name {}", value.mName, name);
   const auto byte_span = value.MemoryView();
   if (byte_span.empty()) {
     return std::nullopt;
@@ -349,33 +347,30 @@ PrimitiveSerializer::Serialize(
 
   FormatAndReturn(result,
     R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})",
-    name,
+    value.mName,
     value_field,
     *(value.GetType()),
-    variablesReference,
+    value.ReferenceId(),
     value.Address());
 }
 
 std::optional<std::pmr::string>
-DefaultStructSerializer::Serialize(
-  const Value &value, std::string_view name, u64 variablesReference, std::pmr::memory_resource *allocator) noexcept
+DefaultStructSerializer::SerializeVariable(const Value &value, std::pmr::memory_resource *allocator) noexcept
 {
 
-  MDB_ASSERT(name == value.mName, "variable name {} != provided name {}", value.mName, name);
   const auto &t = *value.GetType();
   std::pmr::string result{ allocator };
   FormatAndReturn(result,
     R"({{ "name": "{}", "value": "{}", "type": "{}", "variablesReference": {}, "memoryReference": "{}" }})",
-    name,
+    value.mName,
     t,
     t,
-    variablesReference,
+    value.ReferenceId(),
     value.Address());
 }
 
 std::optional<std::pmr::string>
-InvalidValueSerializer::Serialize(
-  const Value &value, std::string_view name, u64 variablesReference, std::pmr::memory_resource *allocator) noexcept
+InvalidValueSerializer::SerializeVariable(const Value &value, std::pmr::memory_resource *allocator) noexcept
 {
   std::pmr::string result{ allocator };
   FormatAndReturn(result,
@@ -386,8 +381,7 @@ InvalidValueSerializer::Serialize(
 }
 
 std::optional<std::pmr::string>
-ArraySerializer::Serialize(
-  const Value &value, std::string_view name, u64 variablesReference, std::pmr::memory_resource *allocator) noexcept
+ArraySerializer::SerializeVariable(const Value &value, std::pmr::memory_resource *allocator) noexcept
 {
   auto &t = *value.GetType();
   const Type *no_alias = t.ResolveAlias();
@@ -397,7 +391,7 @@ ArraySerializer::Serialize(
     value.mName,
     t,
     t,
-    variablesReference,
+    value.ReferenceId(),
     value.Address(),
     no_alias->ArraySize());
 }
@@ -417,8 +411,7 @@ CStringSerializer::FormatValue(
 }
 
 std::optional<std::pmr::string>
-CStringSerializer::Serialize(
-  const Value &value, std::string_view name, u64 variablesReference, std::pmr::memory_resource *allocator) noexcept
+CStringSerializer::SerializeVariable(const Value &value, std::pmr::memory_resource *allocator) noexcept
 {
   const auto byte_span = value.FullMemoryView();
   if (byte_span.empty()) {
@@ -436,7 +429,7 @@ CStringSerializer::Serialize(
   std::pmr::string result{ allocator };
   FormatAndReturn(result,
     R"({{ "name": "{}", "value": "{}", "type": "const char *", "variablesReference": {}, "memoryReference": "{}" }})",
-    name,
+    value.mName,
     DAPStringView{ cast },
     0,
     value.Address());

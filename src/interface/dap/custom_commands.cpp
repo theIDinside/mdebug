@@ -34,14 +34,14 @@ ParseCustomRequestCommand(
 void
 ContinueAll::Execute() noexcept
 {
-  auto target = GetSupervisor();
+  tc::SupervisorState *target = GetSupervisor();
   MDB_ASSERT(target, "Target must not be null");
-  auto res = Allocate<ContinueAllResponse>(true, this, target->TaskLeaderTid());
+  auto *res = Allocate<ContinueAllResponse>(true, this, target->TaskLeaderTid());
   std::vector<Tid> resumedThreads{};
   // N.B: it's unfortunate that VSCode doesn't honor the "allThreadsContinued" field on a continued event
   // because merely sending 1 continued event for a thread with that flag set, doesn't update the UI. File bug with
   // vscode. instead we have to re-factor resume target to report the resumed threads.
-  auto result = target->ResumeTarget(tc::RunType::Continue, &resumedThreads);
+  auto result = target->ResumeTarget(tc::RunType::Continue);
   res->mSuccess = result;
   if (result) {
     for (const auto &tid : resumedThreads) {
@@ -67,9 +67,9 @@ ContinueAllResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
 void
 PauseAll::Execute() noexcept
 {
-  auto target = GetSupervisor();
+  tc::SupervisorState *target = GetSupervisor();
   auto tid = target->TaskLeaderTid();
-  target->StopAllTasks([client = mDebugAdapterManager, tid, sessionId = mProcessId, target]() {
+  target->StopAllTasks([client = mDebugAdapterManager, tid, target]() {
     client->PostDapEvent(target->CreateStoppedEvent(StoppedReason::Pause, "Paused", tid, "Paused all", true, {}));
   });
   return WriteResponse(PauseAllResponse{ true, this });
@@ -123,7 +123,7 @@ void
 GetProcesses::Execute() noexcept
 {
   IdContainer result{};
-  for (auto tc : Tracer::Get().GetAllProcesses()) {
+  for (tc::SupervisorState *tc : Tracer::Get().GetAllProcesses()) {
     result.emplace_back(tc->TaskLeaderTid(), tc->GetProcessId());
   }
 

@@ -493,8 +493,8 @@ DebugAdapterManager::InitAllocators() noexcept
   mCommandsAllocator = ArenaResource::CreateUniquePtr(Page{ 16 });
   mCommandResponseAllocator = ArenaResource::CreateUniquePtr(Page{ 128 });
   mEventsAllocator = ArenaResource::CreateUniquePtr(Page{ 16 });
-  for (auto i = 0; i < 512; ++i) {
-    mCommandAllocatorPool.push_back(ArenaResource::Create(Page{ 32 }));
+  for (auto i = 0; i < 32; ++i) {
+    mCommandAllocatorPool.push_back(ArenaResource::Create(Page{ 512 }));
   }
 }
 

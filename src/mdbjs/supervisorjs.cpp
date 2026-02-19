@@ -65,7 +65,7 @@ JsSupervisor::Breakpoints(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCo
 
 /* static */
 JSValue
-JsSupervisor::ResumeAll(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv)
+JsSupervisor::ResumeAll(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
 {
   auto *supervisor = GetThisOrReturnException(supervisor, OpaqueDataErrorMessage);
 

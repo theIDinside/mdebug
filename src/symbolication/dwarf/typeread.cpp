@@ -324,8 +324,6 @@ TypeDIEContext::Reserve(size_t size)
   mAncestorDies.reserve(size);
 }
 
-TypeDIEContext::TypeDIEContext(DwarfTag tag) : mTag(tag) {}
-
 void
 TypeDIEContext::AppendDie(DieReference dieRef)
 {
@@ -354,7 +352,7 @@ IsDWARFUnit(DwarfTag tag)
 TypeDIEContext
 TypeDIEContext::Create(DieReference dieRef)
 {
-  TypeDIEContext result{ dieRef.GetDie()->mTag };
+  TypeDIEContext result;
 
   result.AppendDie(dieRef);
   for (auto ref = dieRef.GetParent(); ref.has_value(); ref = ref->GetParent()) {
@@ -416,8 +414,8 @@ TypeDIEContext::operator==(const TypeDIEContext &rhs) const
 void
 TypeSymbolicationContext::ProcessMemberVariable(DieReference cu_die) noexcept
 {
-  const auto locAttribute = cu_die.ReadAttribute(Attribute::DW_AT_data_member_location);
-  auto location = locAttribute.transform(AttributeValue::AsUnsigned);
+  auto location =
+    cu_die.ReadAttribute(Attribute::DW_AT_data_member_location).transform(AttributeValue::AsUnsigned);
 
   const auto name = cu_die.ReadAttribute(Attribute::DW_AT_name);
   const auto typeId = cu_die.ReadAttribute(Attribute::DW_AT_type);
@@ -439,15 +437,14 @@ TypeSymbolicationContext::ProcessMemberVariable(DieReference cu_die) noexcept
     }
     const auto dataBitOffset =
       cu_die.ReadAttribute(Attribute::DW_AT_data_bit_offset).transform(AttributeValue::AsUnsigned);
+    if (!dataBitOffset) {
+      return;
+    }
     location = std::make_optional(*dataBitOffset / 8);
     bitFieldOffset = *dataBitOffset % 8;
     bitFieldSize = *bitSize;
   }
 
-  MDB_ASSERT(locAttribute->form != AttributeForm::DW_FORM_loclistx,
-    "loclistx location descriptors not supported yet. cu={}, die=0x{:x}",
-    cu_die.GetUnitData()->SectionOffset(),
-    cu_die.GetDie()->mSectionOffset);
   MDB_ASSERT(typeId,
     "Expected to find type attribute for die 0x{:x} ({})",
     cu_die.GetDie()->mSectionOffset,
@@ -510,7 +507,6 @@ TypeSymbolicationContext::ProcessEnumDie(DieReference compUnitDie) noexcept
 void
 TypeSymbolicationContext::ResolveDeclarationType(sym::Type *type)
 {
-  auto *cu = type->mCompUnitDieReference->GetUnitData();
   DieReference leafDie = type->mCompUnitDieReference->ToDieReference();
   const auto declarationDieContext = TypeDIEContext::Create(leafDie);
 

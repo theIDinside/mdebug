@@ -74,7 +74,7 @@ JsTaskInfo::ToString(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, 
 }
 
 /*static*/ JSValue
-JsTaskInfo::Resume(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv)
+JsTaskInfo::Resume(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
 {
   auto *taskInfo = GetThisOrReturnException(taskInfo, TaskInfoOpaqueDataErrorMessage);
 

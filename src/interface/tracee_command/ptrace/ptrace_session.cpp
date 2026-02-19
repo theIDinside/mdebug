@@ -75,7 +75,7 @@ IfStoppedToStopStatus(PtraceEvent event) noexcept
 {
   using enum StopKind;
   const auto signal = WSTOPSIG(event.mStatus);
-  StopStatus result{ .mPid = event.mPid };
+  StopStatus result{ .mPid = event.mPid, .uExitCode = {} };
   result.mIsTerminatingEvent = false;
   auto &kind = result.ws;
 
@@ -194,13 +194,17 @@ Session::ReadRegisters(TaskInfo &t) noexcept
 }
 
 TaskExecuteResponse
-Session::WriteRegisters(TaskInfo &t, void *data, size_t length) noexcept
+Session::WriteRegisters(
+  [[maybe_unused]] TaskInfo &t, [[maybe_unused]] void *data, [[maybe_unused]] size_t length) noexcept
 {
   TODO("Process::WriteRegisters(TaskInfo &t, void *data, size_t length) noexcept");
 }
 
 TaskExecuteResponse
-Session::SetRegister(TaskInfo &t, size_t registerNumber, void *data, size_t length) noexcept
+Session::SetRegister([[maybe_unused]] TaskInfo &t,
+  [[maybe_unused]] size_t registerNumber,
+  [[maybe_unused]] void *data,
+  [[maybe_unused]] size_t length) noexcept
 {
   TODO("Process::SetRegister(TaskInfo &t, size_t registerNumber, void *data, size_t length) noexcept");
 }
@@ -325,11 +329,10 @@ TaskExecuteResponse
 Session::StopTask(TaskInfo &t) noexcept
 {
   const auto result = tgkill(mTaskLeader, t.mTid, SIGSTOP);
+  DBGBUFLOG(control, "SIGSTOP to {}.{}: {}", mTaskLeader, t.mTid, result == -1 ? "failed" : "success");
   if (result == -1) {
-    DBGBUFLOG(control, "failed to send SIGSTOP to {}.{}", mTaskLeader, t.mTid);
     return TaskExecuteResponse::Error(errno);
   }
-  DBGBUFLOG(control, "sent SIGSTOP to {}.{}", mTaskLeader, t.mTid);
   t.RequestedStop();
   return TaskExecuteResponse::Ok();
 }
@@ -363,7 +366,8 @@ Session::DoResumeTarget(RunType type) noexcept
   u32 resumed = 0;
   for (auto &t : mThreads) {
     if (t.mTask->CanContinue()) {
-      mScheduler->Schedule(*t.mTask, { true });
+      t.mTask->SetResumeType(type);
+      mScheduler->Schedule(*t.mTask, { .mShouldResumeAfterProcessing = true });
       if (!t.mTask->CanContinue()) {
         resumed++;
       }
@@ -428,22 +432,8 @@ Session::GetUpToDateRegisterCache(Tid tid) noexcept
   return &mRegisterCache[tid];
 }
 
-/* static */
-std::vector<Elf64_Phdr>
-Session::LoadProgramHeaders(Pid pid, AddrPtr phdrAddress, size_t phdrCount, size_t phdrEntrySize) noexcept
-{
-  std::vector<Elf64_Phdr> result{ phdrCount };
-  for (auto i = 0; i < phdrCount; ++i) {
-    auto entryAddress = phdrAddress + i * phdrEntrySize;
-    auto &entry = result.emplace_back();
-    const auto readResult = DoReadBytes(entryAddress, sizeof(Elf64_Phdr), (u8 *)&entry);
-    MDB_ASSERT(readResult.WasSuccessful() && readResult.uBytesRead == phdrEntrySize, "Read not of expected size");
-  }
-  return result;
-}
-
 TaskInfo *
-Session::CreateNewTask(Tid tid, std::optional<std::string_view> name, bool running) noexcept
+Session::CreateNewTask(Tid tid, std::optional<std::string_view> name) noexcept
 {
   MDB_ASSERT(tid != 0 && !HasTask(tid), "Task {} has already been created!", tid);
   auto task = TaskInfo::CreateTask(*this, tid);
@@ -584,9 +574,11 @@ Session::ForkExec(ui::dap::DebugAdapterManager *debugAdapterClient,
       breakpointBehavior.value_or(BreakpointBehavior::StopAllThreadsWhenHit));
 
     std::string threadName;
-    auto name = supervisor->ReadThreadName(leader, threadName);
-    supervisor->CreateNewTask(leader, threadName, false);
+    if (!supervisor->ReadThreadName(leader, threadName)) {
+      threadName = "???";
+    }
 
+    supervisor->CreateNewTask(leader, threadName);
     supervisor->PostExec(program, stopAtEntry, /* installDynamicLoaderBreakpoints */ true);
 
     if (ttyFd) {
@@ -619,9 +611,8 @@ NativeInitCloneEvent(TaskInfo &cloningTask, const user_regs_struct &regs, Sessio
   if (orig_rax == SYS_clone) {
     const TPtr<void> pointerToStackPointerArg = sys_arg_n<2>(regs);
     const TPtr<int> pointerToChildTidArg = sys_arg_n<4>(regs);
-    const u64 tls = sys_arg_n<5>(regs);
+    // const u64 tls = sys_arg_n<5>(regs);
     auto childPid = control.ReadType(pointerToChildTidArg);
-    // result.mTaskVMInfo = vmInfo;
     MDB_ASSERT(!control.HasTask(childPid), "Tracee controller already has task {} !", childPid);
     return childPid;
   }
@@ -629,7 +620,6 @@ NativeInitCloneEvent(TaskInfo &cloningTask, const user_regs_struct &regs, Sessio
     const TraceePointer<clone_args> ptr = sys_arg<mdb::SysRegister::RDI>(regs);
     const auto res = control.ReadType(ptr);
     const auto childPid = control.ReadType(TPtr<pid_t>{ res.parent_tid });
-    // result.mTaskVMInfo = TaskVMInfo{ .stack_low = res.stack, .stack_size = res.stack_size, .tls = res.tls };
     return childPid;
   }
   PANIC("Unknown clone syscall!");
@@ -725,7 +715,7 @@ Session::HandleEvent(TaskInfo &task, StopStatus stopStatus) noexcept
     if (!ReadThreadName(childPid, threadName) && !ReadThreadName(mTaskLeader, threadName)) {
       threadName = "???";
     }
-    CreateNewTask(childPid, threadName, false);
+    CreateNewTask(childPid, threadName);
     mScheduler->Schedule(task, { true, task.mResumeRequest.mType });
     ProcessQueuedUnhandled(childPid);
   } break;
@@ -805,7 +795,7 @@ Session::HandleFork(TaskInfo &parentTask, pid_t newChild, bool vFork) noexcept
   auto *newSupervisor = Session::Create(newChild, mDebugAdapterClient);
 
   bool resume = true;
-  newSupervisor->CreateNewTask(newChild, "forked", false);
+  newSupervisor->CreateNewTask(newChild, "forked");
   if (!vFork) {
     DBGLOG(core, "event was not vfork; disabling breakpoints in new address space.");
 
@@ -820,7 +810,7 @@ Session::HandleFork(TaskInfo &parentTask, pid_t newChild, bool vFork) noexcept
         uninstalledBreakpointLocations.insert(loc->Address());
       }
     }
-    newSupervisor->mStopEventHandlerStack.PushEventHandler([](auto &e) { return EventState::Defer; });
+    newSupervisor->mStopEventHandlerStack.PushEventHandler([](const auto &) { return EventState::Defer; });
     newSupervisor->OpenMemoryFile();
 
     mDebugAdapterClient->PostDapEvent(new ui::dap::Process{ mTaskLeader, newChild, "forked", true });

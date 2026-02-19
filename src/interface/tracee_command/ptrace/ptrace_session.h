@@ -46,11 +46,8 @@ private:
   void OpenMemoryFile() noexcept;
   RegisterCache *GetUpToDateRegisterCache(Tid tid) noexcept;
 
-  std::vector<Elf64_Phdr> LoadProgramHeaders(
-    Pid pid, AddrPtr phdrAddress, size_t phdrCount, size_t phdrEntrySize) noexcept;
-
   /* Create new task meta data for `tid` */
-  TaskInfo *CreateNewTask(Tid tid, std::optional<std::string_view> name, bool running) noexcept;
+  TaskInfo *CreateNewTask(Tid tid, std::optional<std::string_view> name) noexcept;
   void InitRegisterCacheFor(const TaskInfo &task) noexcept;
 
 public:

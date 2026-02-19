@@ -99,18 +99,9 @@ InterpreterPath(const Elf *elf, const ElfSection *interp) noexcept
   return path;
 }
 
-static constexpr std::array<std::string_view, 6> LOADER_SYMBOL_NAMES = {
-  "r_debug_state",
-  "_r_debug_state",
-  "_dl_debug_state",
-  "rtld_db_dlactivity",
-  "__dl_rtld_db_dlactivity",
-  "_rtld_debug_state",
-};
-
 SupervisorState::SupervisorState(
   SupervisorType type, Tid taskLeader, ui::dap::DebugAdapterManager *client) noexcept
-    : mTaskLeader(taskLeader), mDebugAdapterClient(client), mUserBreakpoints(*this),
+    : mTaskLeader(taskLeader), mUserBreakpoints(*this), mDebugAdapterClient(client),
       mScheduler{ std::make_unique<TaskScheduler>(this) }, mNullUnwinder{ new sym::Unwinder{ nullptr } },
       mSupervisorType(type)
 {
@@ -200,15 +191,14 @@ SupervisorState::InstallDynamicLoaderBreakpoints(AddrPtr mappedDynamicSectionAdd
       .mBreakpointLocationResult = GetOrCreateBreakpointLocation(dlDebugState),
       .mTimesToHit = {},
       .mControl = *this },
-    std::string_view{ "Initialize debug state" },
     [this, mappedDynamicSectionAddress]() {
-      auto sect = mMainExecutable->GetObjectFile()->GetElf()->GetSection(ElfSec::Dynamic);
+      const ElfSection *sect = mMainExecutable->GetObjectFile()->GetElf()->GetSection(ElfSec::Dynamic);
       MDB_ASSERT(sect, "Could not find .dynamic section");
       // TODO: Start supporting 32 bits
       auto count = sect->GetDataAs<Elf64_Dyn>().size();
       std::vector<Elf64_Dyn> mappedEntries{ count };
       // slow read. who cares. but change to something better when there's literally nothing else to do.
-      const auto bytesRead = ReadIntoVector(mappedDynamicSectionAddress, count, mappedEntries);
+      (void)ReadIntoVector(mappedDynamicSectionAddress, count, mappedEntries);
       for (const auto &entry : mappedEntries) {
         if (entry.d_tag == DT_DEBUG) {
           auto rDebug = ReadType(TPtr<r_debug>{ entry.d_un.d_val });
@@ -338,7 +328,7 @@ SupervisorState::HasTask(Tid tid) noexcept
 }
 
 bool
-SupervisorState::ResumeTarget(tc::RunType resumeType, std::vector<Tid> *resumedThreads) noexcept
+SupervisorState::ResumeTarget(tc::RunType resumeType) noexcept
 {
   DBGLOG(core, "[supervisor]: resume tracee {}", resumeType);
   mScheduler->SetNormalScheduling();
@@ -376,7 +366,6 @@ SupervisorState::ScheduleResume(TaskInfo &task, tc::RunType type) noexcept
 void
 SupervisorState::StopAllTasks() noexcept
 {
-  DBGBUFLOG(control, "Stopping all threads")
   // If all threads were at a signal-delivery stop, then we will not receive new wait status events
   // and we will never report to the user that everyone has stopped. We need to track that, and possibly emit a
   // stopped event immediately.
@@ -384,8 +373,7 @@ SupervisorState::StopAllTasks() noexcept
   for (auto &entry : mThreads) {
     auto &t = *entry.mTask;
     if (t.mTraceeState == TraceeState::Running) {
-      DBGBUFLOG(control, "thread {} is init={}", t.mTid, bool{ t.mHasStarted });
-      const auto response = StopTask(t);
+      (void)StopTask(t);
     }
     t.RequestedStop();
   }
@@ -460,7 +448,7 @@ SupervisorState::EmitSteppedStop(LWP lwp, std::string_view message, bool allStop
 }
 
 void
-SupervisorState::EmitSignalEvent(LWP lwp, int signal) noexcept
+SupervisorState::EmitSignalEvent(LWP lwp) noexcept
 {
   /* todo(simon): make it possible to determine & set if allThreadsStopped is true or false. For now, we just say
    *  that all get stopped during this event. */
@@ -1488,7 +1476,7 @@ SupervisorState::ReadLinkerInformation(const r_debug &dbg, std::vector<ObjectFil
 }
 
 bool
-SupervisorState::ReverseResumeTarget(tc::RunType resumeType) noexcept
+SupervisorState::ReverseResumeTarget([[maybe_unused]] tc::RunType resumeType) noexcept
 {
   // Normal debug sessions do not support reverse execution.
   return false;

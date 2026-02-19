@@ -83,7 +83,7 @@ public:
   Elf(Elf64Header *header, std::vector<ElfSection> &&sections) noexcept;
   std::span<const ElfSection> GetSections() const noexcept;
   const ElfSection *GetSection(std::string_view name) const noexcept;
-  constexpr const ElfSection *GetSection(ElfSec section) const noexcept;
+  const ElfSection *GetSection(ElfSec section) const noexcept;
   const ElfSection *GetSectionInfallible(std::string_view name) const noexcept;
   bool HasDWARF() const noexcept;
 

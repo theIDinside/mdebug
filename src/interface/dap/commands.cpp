@@ -702,7 +702,7 @@ struct StepOut final : public ui::UICommand
 struct SetBreakpointsResponse final : ui::UIResult
 {
   SetBreakpointsResponse(bool success, ui::UICommandPtr cmd, BreakpointRequestKind type) noexcept
-      : ui::UIResult(success, cmd), mType(type), mBreakpoints(this->mAllocator->GetAllocator())
+      : ui::UIResult(success, cmd), mBreakpoints(this->mAllocator->GetAllocator()), mType(type)
   {
   }
 
@@ -710,7 +710,7 @@ struct SetBreakpointsResponse final : ui::UIResult
     ui::UICommandPtr cmd,
     BreakpointRequestKind type,
     std::pmr::vector<ui::dap::Breakpoint> breakpoints) noexcept
-      : ui::UIResult(success, cmd), mType(type), mBreakpoints(std::move(breakpoints))
+      : ui::UIResult(success, cmd), mBreakpoints(std::move(breakpoints)), mType(type)
   {
   }
 
@@ -1492,10 +1492,10 @@ struct NativeLaunch final : public Launch
     mDebugAdapterManager->ConnectConfigToken(process->TaskLeaderTid(), mConfigToken);
 
     // Queue a pseudo stop event that will force a start during configurationDone by processing deferred events.
-    process->QueuePending(StopStatus{ .ws = StopKind::Stopped, .mPid = process->TaskLeaderTid() });
+    process->QueuePending(StopStatus{ .ws = StopKind::Stopped, .mPid = process->TaskLeaderTid(), .uSignal = 0 });
     WriteResponse(LaunchResponse{ process->TaskLeaderTid(), true, this });
 
-    auto config = mDebugAdapterManager->GetConfigurationFor(mConfigToken);
+    SupervisorSessionConfiguration *config = mDebugAdapterManager->GetConfigurationFor(mConfigToken);
 
     // As the last config request, we start processing deferred ptrace events, effectively "starting" the debug
     // session
@@ -1608,16 +1608,15 @@ struct RRLaunch final : public Launch
       replaySupervisor->CurrentLiveProcesses().front(), replaySupervisor->CurrentLiveProcesses(), true, this });
     session->PostExec(replaySupervisor->ExecedFile(session->TaskLeaderTid()), true, true);
 
-    auto config = mDebugAdapterManager->GetConfigurationFor(mConfigToken);
+    SupervisorSessionConfiguration *cfg = mDebugAdapterManager->GetConfigurationFor(mConfigToken);
 
     // last step to run, right when we've completed configuration
-    config->AddConfigurationRequest([](tc::SupervisorState &supervisor) {
+    cfg->AddConfigurationRequest([](tc::SupervisorState &supervisor) {
       auto *session = static_cast<replay::Session *>(&supervisor);
-      replay::ReplaySupervisor *replaySupervisor = session->GetReplaySupervisor();
       session->EmitStopped(session->TaskLeaderTid(), ui::dap::StoppedReason::Entry, "attached", true, {});
     });
 
-    config->OnLaunch({ session });
+    cfg->OnLaunch({ session });
   }
 
   void
@@ -1721,7 +1720,7 @@ struct Attach final : public UICommand
   void
   Execute() noexcept final
   {
-    auto *supervisor = Tracer::Get().SessionAttach(mDebugAdapterManager, attachArgs);
+    auto *supervisor = Tracer::Get().SessionAttach(attachArgs);
     WriteResponse(AttachResponse{ supervisor->GetProcessId(), true, this });
   }
 
@@ -2374,8 +2373,7 @@ Variables::Execute() noexcept
     }
   } break;
   case ContextType::Variable:
-    return WriteResponse(
-      VariablesResponse{ true, this, context.mSymbolFile->ResolveVariable(context, mStart, mCount) });
+    return WriteResponse(VariablesResponse{ true, this, SymbolFile::ResolveVariable(context, mStart, mCount) });
   case ContextType::Global:
     TODO("Global variables not yet implemented support for");
     break;
@@ -2414,7 +2412,7 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
   auto it = std::back_inserter(variables_contents);
   for (const auto &v : mVariables) {
     if (auto *datvis = v->GetSerializer(); datvis != nullptr) {
-      auto opt = datvis->Serialize(*v, v->mName, v->ReferenceId(), std::pmr::new_delete_resource());
+      auto opt = datvis->SerializeVariable(*v, std::pmr::new_delete_resource());
       if (opt) {
         it = std::format_to(it, "{},", *opt);
       } else {

@@ -455,7 +455,7 @@ ResumeToBreakpoint::ResumeToBreakpoint(RequiredUserParameters param, Tid tid) no
 }
 
 BreakpointHitEventResult
-ResumeToBreakpoint::OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept
+ResumeToBreakpoint::OnHit([[maybe_unused]] tc::SupervisorState &controller, TaskInfo &task) noexcept
 {
   if (task.mTid == mStopOnlyTid) {
     DBGBUFLOG(control, "Hit resume_bp_t {}", mId);
@@ -511,7 +511,7 @@ Logpoint::prepareExpression(std::string_view expr) noexcept
 }
 
 void
-Logpoint::EvaluateLog(TaskInfo &t) noexcept
+Logpoint::EvaluateLog([[maybe_unused]] TaskInfo &t) noexcept
 {
   if (!mExpression) {
     return;
@@ -530,14 +530,14 @@ Logpoint::OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept
 }
 
 BreakpointHitEventResult
-InternalBreakpoint::OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept
+InternalBreakpoint::OnHit(
+  [[maybe_unused]] tc::SupervisorState &controller, [[maybe_unused]] TaskInfo &task) noexcept
 {
   return mMaintenanceFn();
 }
 
-InternalBreakpoint::InternalBreakpoint(RequiredUserParameters param,
-  std::string_view debugName,
-  std::function<BreakpointHitEventResult()> maintenanceFunc) noexcept
+InternalBreakpoint::InternalBreakpoint(
+  RequiredUserParameters param, std::function<BreakpointHitEventResult()> maintenanceFunc) noexcept
     : UserBreakpoint(std::move(param), LocationUserKind::Maintenance), mMaintenanceFn(std::move(maintenanceFunc))
 {
 }
@@ -548,7 +548,7 @@ SOLoadingBreakpoint::SOLoadingBreakpoint(RequiredUserParameters param) noexcept
 }
 
 BreakpointHitEventResult
-SOLoadingBreakpoint::OnHit(tc::SupervisorState &controller, TaskInfo &task) noexcept
+SOLoadingBreakpoint::OnHit(tc::SupervisorState &controller, [[maybe_unused]] TaskInfo &task) noexcept
 {
   controller.OnSharedObjectEvent();
   // we don't stop on shared object loading breakpoints

@@ -52,7 +52,6 @@ struct DieContextEntry
  * parent that is not a DWARF unit type */
 class TypeDIEContext
 {
-  DwarfTag mTag;
   // goes from closest-to-mDie to root
   std::vector<DieContextEntry> mAncestorDies;
   void Reserve(size_t size);
@@ -60,7 +59,6 @@ class TypeDIEContext
   bool operator==(const TypeDIEContext &rhs) const;
 
 public:
-  explicit TypeDIEContext(DwarfTag tag);
   void AppendDie(DieReference dieRef);
   static TypeDIEContext Create(DieReference dieRef);
   bool TypeContextMatches(const TypeDIEContext &other) const;

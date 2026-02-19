@@ -54,16 +54,6 @@ TraceFrameTaskContext::From(int signal, const rr::ReplayTask &task, pid_t newChi
 
 namespace mdb::tc::replay {
 
-static SupervisorEvent
-SupervisorEventFromTask(SupervisorSessionEventType kind, const rr::ReplayTask *t)
-{
-  if (t) {
-    return SupervisorEvent{ SessionEvent{ .mType = kind, .mTaskInfo = TraceFrameTaskContext::From(0, *t) } };
-  } else {
-    return SupervisorEvent{ SessionEvent{ .mType = kind, .mTaskInfo = { .mIsValid = false } } };
-  }
-}
-
 void
 ReplaySupervisor::StartReplay(const char *traceDir, std::function<void()> onStartCompleted) noexcept
 {
@@ -261,7 +251,7 @@ ReplaySupervisor::RequestResume(ResumeReplay resumeReplayOp)
 pid_t
 ReplaySupervisor::GetTaskToResume() const
 {
-  if (auto task = mTimeline->current_session().current_task()) {
+  if (auto *task = mTimeline->current_session().current_task()) {
     return task->rec_tid;
   }
   return 0;
@@ -428,7 +418,7 @@ ReplaySupervisor::CurrentFrameTime() const noexcept
 }
 
 static rr::ReplaySession::Flags
-CreateReplayFlags(const StartReplayOptions &options)
+CreateReplayFlags()
 {
   // For now, configure these to be default of gdbserver's
   rr::ReplaySession::Flags result;
@@ -502,14 +492,14 @@ ReplaySupervisor::PublishSessionEvent(
   SupervisorSessionEventType type, const TraceFrameTaskContext &taskContext) noexcept
 {
   DBGLOG(core, "publish session event {}", type);
-  PublishEvent(SessionEvent{ type, taskContext });
+  PublishEvent(SessionEvent{ .mType = type, .mTaskInfo = taskContext });
 }
 
 void
 ReplaySupervisor::InitializeDebugSession()
 {
   const auto &opts = mReplayOptions.value();
-  const auto flags = CreateReplayFlags(opts);
+  const auto flags = CreateReplayFlags();
   mTimeline = std::make_unique<rr::ReplayTimeline>(rr::ReplaySession::create(opts.trace_dir, flags));
   MDB_ASSERT(mTimeline != nullptr, "Failed to create replay session");
   if (!mTimeline) {
@@ -562,21 +552,13 @@ ReplaySupervisor::SetWillNeedResume(const rr::BreakStatus *breakStatus)
   }
 }
 
-static bool
-InterestedInReplayStop(const rr::ReplayResult &result)
-{
-  return result.break_status.breakpoint_hit || !result.break_status.watchpoints_hit.empty() ||
-         result.break_status.signal;
-}
-
 static StopKind
 DetermineCloneVariant(u64 flags)
 {
   if (flags & (CLONE_VM | CLONE_THREAD | CLONE_SIGHAND)) {
     return StopKind::Cloned;
-  } else {
-    return StopKind::Forked;
   }
+  return StopKind::Forked;
 }
 
 template <typename UserRegsStructKind>
@@ -635,7 +617,8 @@ ReplaySupervisor::CheckStopKind(pid_t recTid, int syscallNumber, const rr::Trace
       // pull out the 1st member of the struct, which is the `flags` arg
       uintptr_t cloneArgsPtr = traceFrame.regs().arg1();
       // structs are well defined in size, but read manpages `man clone3`, possible future extensions
-      size_t cloneArgsSize = traceFrame.regs().arg2();
+      // For now, we don't use it.
+      // size_t cloneArgsSize = traceFrame.regs().arg2();
       // flags is 1st member in clone_args, so just read that
       if (cloneArgsPtr == 0) {
         return StopKind::NotKnown;

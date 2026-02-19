@@ -289,7 +289,7 @@ Tracer::KillUI() noexcept
 }
 
 static tc::SupervisorState *
-PtraceAttach(ui::dap::DebugAdapterManager *client, const PtraceAttachArgs &args) noexcept
+PtraceAttach(const PtraceAttachArgs &args) noexcept
 {
   auto supervisor = Tracer::Get().GetController(args.pid);
   if (!supervisor) {
@@ -303,27 +303,14 @@ PtraceAttach(ui::dap::DebugAdapterManager *client, const PtraceAttachArgs &args)
   return supervisor;
 }
 
-static bool
-RRAttach(ui::dap::DebugAdapterManager *client, SessionId sessionId, const RRAttachArgs &args) noexcept
-{
-  auto supervisor = Tracer::Get().GetController(args.pid);
-  MDB_ASSERT(supervisor, "No supervisor with {}", args.pid);
-  // The DAP request was made for a supervisor that was not of the right type.
-  if (supervisor->mSupervisorType != tc::SupervisorType::RR) {
-    return false;
-  }
-
-  return true;
-}
-
 tc::SupervisorState *
-Tracer::SessionAttach(ui::dap::DebugAdapterManager *client, const AttachArgs &args) noexcept
+Tracer::SessionAttach(const AttachArgs &args) noexcept
 {
   using MatchResult = tc::SupervisorState *;
 
   return std::visit(
-    Match{ [&](const PtraceAttachArgs &args) -> MatchResult { return PtraceAttach(client, args); },
-      [&](const RRAttachArgs &args) -> MatchResult { TODO("Possibly never implement this, after all"); } },
+    Match{ [&](const PtraceAttachArgs &args) -> MatchResult { return PtraceAttach(args); },
+      [&](const RRAttachArgs &) -> MatchResult { TODO("Possibly never implement this, after all"); } },
     args);
 }
 

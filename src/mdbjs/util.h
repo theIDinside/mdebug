@@ -28,9 +28,11 @@ struct StackValue
 
   StackValue GetPropertyUint32(u32 index) const;
   StackValue GetPropertyString(const char *string) const;
+  StackValue ToString() const;
 
   JSValue Throw();
   JSValue Release();
+  static StackValue ToString(JSContext *cx, JSValue value);
   static StackValue GetGlobal(JSContext *cx);
   static StackValue Wrap(JSContext *cx, JSValue value);
   static StackValue NewUint32(JSContext *cx, u32 value);

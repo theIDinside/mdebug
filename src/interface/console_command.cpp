@@ -47,8 +47,8 @@ ConsoleCommandInterpreter::RegisterConsoleCommand(
 ConsoleCommandResult
 ConsoleCommandInterpreter::Interpret(const std::string &input, Allocator *allocator) noexcept
 {
-  auto result = js::Scripting::Get().ReplEvaluate(allocator, input);
-  return ConsoleCommandResult{ true, result };
+  auto *result = js::Scripting::Get().ReplEvaluate(allocator, input);
+  return ConsoleCommandResult{ .mSuccess = true, .mContents = result };
 }
 
 GenericCommand::GenericCommand(std::string functionName, Function &&function) noexcept
