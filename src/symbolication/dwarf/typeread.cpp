@@ -1,5 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "typeread.h"
+#include "lib/static_vector.h"
 #include "symbolication/block.h"
 #include "symbolication/dwarf/attribute_read.h"
 #include "symbolication/dwarf/debug_info_reader.h"
@@ -27,11 +28,14 @@ FunctionSymbolicationContext::FunctionSymbolicationContext(ObjectFile &obj, sym:
 }
 
 NonNullPtr<Type>
-FunctionSymbolicationContext::ProcessTypeDie(DieReference die) noexcept
+FunctionSymbolicationContext::ProcessTypeDie(DieReference dieRef) noexcept
 {
-  sym::Type *t = mObjectRef.GetTypeStorage()->GetOrCreateNewType(die.AsIndexed());
+  sym::Type *t = mObjectRef.GetTypeStorage()->GetOrCreateNewType(dieRef.AsIndexed());
   if (t == nullptr) {
     PANIC("Failed to get or prepare new type to be realized");
+  }
+  if (dieRef.TypeDieIsDeclaration()) {
+    t->SetIsDeclaration();
   }
   return NonNull(*t);
 }
@@ -125,8 +129,7 @@ FunctionSymbolicationContext::ProcessVariableDie(
   const DieReference originDie = variableDebugInfoEntry;
   for (;;) {
     sym::dw::ProcessDie(variableDebugInfoEntry,
-      [&state, &variableDebugInfoEntry](
-        UnitReader &reader, Abbreviation &abbreviation, const AbbreviationInfo &info) {
+      [&state, this](UnitReader &reader, Abbreviation &abbreviation, const AbbreviationInfo &info) {
         switch (abbreviation.mName) {
         case Attribute::DW_AT_location:
           state.mLocation = ReadAttributeValue(reader, abbreviation, info.mImplicitConsts);
@@ -142,8 +145,7 @@ FunctionSymbolicationContext::ProcessVariableDie(
         case Attribute::DW_AT_specification: {
           auto refereeValue = ReadAttributeValue(reader, abbreviation, info.mImplicitConsts);
           const auto declaring_die_offset = refereeValue.AsUnsignedValue();
-          state.mReferedDie = variableDebugInfoEntry.GetUnitData()->GetObjectFile()->GetDebugInfoEntryReference(
-            declaring_die_offset);
+          state.mReferedDie = mObjectRef.GetDebugInfoEntryReference(declaring_die_offset);
           return DieAttributeRead::Continue;
         }
         default:
@@ -262,7 +264,7 @@ FunctionSymbolicationContext::ProcessSymbolInformation() noexcept
 }
 
 TypeSymbolicationContext::TypeSymbolicationContext(ObjectFile &object_file, Type &type) noexcept
-    : mObjectRef(object_file), mCurrentType(&type)
+    : mObjectRef(object_file), mRequestedTypeDieToResolve(&type)
 {
 }
 
@@ -288,8 +290,11 @@ TypeSymbolicationContext::ProcessInheritanceDie(DieReference cu_die) noexcept
   if (!type->mFields.empty()) {
     const auto member_offset = location->AsUnsignedValue();
     for (auto t : type->mFields) {
-      mTypeFields.push_back(
-        Field{ .mType = t.mType, .mObjectBaseOffset = *t.mObjectBaseOffset + member_offset, .mName = t.mName });
+      mTypeFields.push_back(Field{ .mType = t.mType,
+        .mObjectBaseOffset = *t.mObjectBaseOffset + member_offset,
+        .mFieldOffset = 0,
+        .mBitFieldSize = 0,
+        .mName = t.mName });
     }
   }
 }
@@ -314,24 +319,132 @@ name_from_tag(DwarfTag tag) noexcept
 }
 
 void
+TypeDIEContext::Reserve(size_t size)
+{
+  mAncestorDies.reserve(size);
+}
+
+TypeDIEContext::TypeDIEContext(DwarfTag tag) : mTag(tag) {}
+
+void
+TypeDIEContext::AppendDie(DieReference dieRef)
+{
+  mAncestorDies.emplace_back(dieRef.GetDie()->mTag, dieRef);
+}
+
+static bool
+IsDWARFUnit(DwarfTag tag)
+{
+  using enum DwarfTag;
+  switch (tag) {
+  case DW_TAG_compile_unit:
+    [[fallthrough]];
+  case DW_TAG_partial_unit:
+    [[fallthrough]];
+  case DW_TAG_type_unit:
+    [[fallthrough]];
+  case DW_TAG_skeleton_unit:
+    return true;
+  default:
+    return false;
+  }
+}
+
+/* static */
+TypeDIEContext
+TypeDIEContext::Create(DieReference dieRef)
+{
+  TypeDIEContext result{ dieRef.GetDie()->mTag };
+
+  result.AppendDie(dieRef);
+  for (auto ref = dieRef.GetParent(); ref.has_value(); ref = ref->GetParent()) {
+    // We use DWARFDIEContext to compare two (or more) chains of DIE's. They will belong to different files
+    // so adding those, makes absolutely no sense at all.
+    if (IsDWARFUnit(ref->GetDie()->mTag)) {
+      return result;
+    }
+    result.AppendDie(*ref);
+  }
+
+  return result;
+}
+
+bool
+TypeDIEContext::TypeContextMatches(const TypeDIEContext &other) const
+{
+  return *this == other;
+}
+
+bool
+TypeDIEContext::operator==(const TypeDIEContext &rhs) const
+{
+  if (mAncestorDies.size() != rhs.mAncestorDies.size()) {
+    DBGLOG(core,
+      "dies had different amount of ancestors, left={}, right={}",
+      mAncestorDies.size(),
+      rhs.mAncestorDies.size());
+    return false;
+  }
+
+  const bool matchingTags = std::ranges::equal(
+    mAncestorDies, rhs.mAncestorDies, [](const DieContextEntry &lhs, const DieContextEntry &rhs) {
+      if (lhs.mTag == rhs.mTag) {
+        return true;
+      }
+
+      // gcc apparently can have these be interchangeable.
+      return (lhs.mTag == DwarfTag::DW_TAG_structure_type && rhs.mTag == DwarfTag::DW_TAG_class_type) ||
+             (rhs.mTag == DwarfTag::DW_TAG_structure_type && lhs.mTag == DwarfTag::DW_TAG_class_type);
+    });
+
+  if (!matchingTags) {
+    DBGLOG(core, "dies had different tags");
+    return false;
+  }
+
+  return std::ranges::equal(
+    mAncestorDies, rhs.mAncestorDies, [](const DieContextEntry &lhs, const DieContextEntry &rhs) {
+      const auto leftName = lhs.mDie.ReadAttribute(Attribute::DW_AT_name).transform(AttributeValue::ToStringView);
+      const auto rightName = rhs.mDie.ReadAttribute(Attribute::DW_AT_name).transform(AttributeValue::ToStringView);
+      if (leftName && rightName) {
+        DBGBUFLOG(core, "leftDie={}, rightDie={}", *leftName, *rightName);
+      }
+      return leftName == rightName;
+    });
+}
+
+void
 TypeSymbolicationContext::ProcessMemberVariable(DieReference cu_die) noexcept
 {
+  const auto locAttribute = cu_die.ReadAttribute(Attribute::DW_AT_data_member_location);
+  auto location = locAttribute.transform(AttributeValue::AsUnsigned);
 
-  const auto location = cu_die.ReadAttribute(Attribute::DW_AT_data_member_location);
   const auto name = cu_die.ReadAttribute(Attribute::DW_AT_name);
   const auto typeId = cu_die.ReadAttribute(Attribute::DW_AT_type);
 
+  u32 byteOffset = 0;
+  u32 bitFieldOffset = 0;
+  u16 bitFieldSize = 0;
+
   // A member without a location is not a member. It can be a static variable or a constexpr variable.
   if (!location) {
-    DBGLOG(core,
-      "cu={}, die 0x{:x} (name={}) is DW_TAG_member but had no location",
-      cu_die.GetUnitData()->SectionOffset(),
-      cu_die.GetDie()->mSectionOffset,
-      name.transform([](const auto &v) { return v.AsCString(); }).value_or("die had no name"));
-    return;
+    const auto bitSize = cu_die.ReadAttribute(Attribute::DW_AT_bit_size).transform(AttributeValue::AsUnsigned);
+    if (!bitSize) {
+      DBGLOG(core,
+        "cu={}, die 0x{:x} (name={}) is DW_TAG_member but had no location or bit_size",
+        cu_die.GetUnitData()->SectionOffset(),
+        cu_die.GetDie()->mSectionOffset,
+        name.transform([](const auto &v) { return v.AsCString(); }).value_or("die had no name"));
+      return;
+    }
+    const auto dataBitOffset =
+      cu_die.ReadAttribute(Attribute::DW_AT_data_bit_offset).transform(AttributeValue::AsUnsigned);
+    location = std::make_optional(*dataBitOffset / 8);
+    bitFieldOffset = *dataBitOffset % 8;
+    bitFieldSize = *bitSize;
   }
 
-  MDB_ASSERT(location->form != AttributeForm::DW_FORM_loclistx,
+  MDB_ASSERT(locAttribute->form != AttributeForm::DW_FORM_loclistx,
     "loclistx location descriptors not supported yet. cu={}, die=0x{:x}",
     cu_die.GetUnitData()->SectionOffset(),
     cu_die.GetDie()->mSectionOffset);
@@ -340,6 +453,8 @@ TypeSymbolicationContext::ProcessMemberVariable(DieReference cu_die) noexcept
     cu_die.GetDie()->mSectionOffset,
     to_str(cu_die.GetDie()->mTag));
 
+  byteOffset = (*location);
+
   if (!name) {
     // means we're likely some anonymous structure of some kind
     auto containingCompUnitDieReference = mObjectRef.GetDebugInfoEntryReference(typeId->AsUnsignedValue());
@@ -347,19 +462,24 @@ TypeSymbolicationContext::ProcessMemberVariable(DieReference cu_die) noexcept
       "Failed to get compilation unit & die reference from DIE offset: 0x{:x}",
       typeId->AsUnsignedValue());
     sym::Type *type = mObjectRef.GetTypeStorage()->GetOrCreateNewType(containingCompUnitDieReference->AsIndexed());
-    const auto member_offset = location->AsUnsignedValue();
     auto name = name_from_tag(type->mDebugInfoEntryTag);
-    this->mTypeFields.push_back(
-      Field{ .mType = NonNull(*type), .mObjectBaseOffset = member_offset, .mName = name });
+    this->mTypeFields.push_back(Field{ .mType = NonNull(*type),
+      .mObjectBaseOffset = byteOffset,
+      .mFieldOffset = bitFieldOffset,
+      .mBitFieldSize = bitFieldSize,
+      .mName = name });
   } else {
     auto containingCompUnitDieReference = mObjectRef.GetDebugInfoEntryReference(typeId->AsUnsignedValue());
     MDB_ASSERT(containingCompUnitDieReference.has_value(),
       "Failed to get compilation unit & die reference from DIE offset: 0x{:x}",
       typeId->AsUnsignedValue());
     sym::Type *type = mObjectRef.GetTypeStorage()->GetOrCreateNewType(containingCompUnitDieReference->AsIndexed());
-    const auto member_offset = location->AsUnsignedValue();
-    this->mTypeFields.push_back(
-      Field{ .mType = NonNull(*type), .mObjectBaseOffset = member_offset, .mName = name->AsCString() });
+
+    this->mTypeFields.push_back(Field{ .mType = NonNull(*type),
+      .mObjectBaseOffset = byteOffset,
+      .mFieldOffset = bitFieldOffset,
+      .mBitFieldSize = bitFieldSize,
+      .mName = name->AsCString() });
   }
 }
 
@@ -380,18 +500,76 @@ TypeSymbolicationContext::ProcessEnumDie(DieReference compUnitDie) noexcept
     }
   }
 
-  this->mTypeFields.push_back(
-    Field{ .mType = NonNull(*mEnumerationType), .mObjectBaseOffset = memberOffset, .mName = name->AsCString() });
+  this->mTypeFields.push_back(Field{ .mType = NonNull(*mEnumerationType),
+    .mObjectBaseOffset = memberOffset,
+    .mFieldOffset = 0,
+    .mBitFieldSize = 0,
+    .mName = name->AsCString() });
+}
+
+void
+TypeSymbolicationContext::ResolveDeclarationType(sym::Type *type)
+{
+  auto *cu = type->mCompUnitDieReference->GetUnitData();
+  DieReference leafDie = type->mCompUnitDieReference->ToDieReference();
+  const auto declarationDieContext = TypeDIEContext::Create(leafDie);
+
+  // Thankfully a declaration will have the _exact_ name required making us able to skip the regex-search of debug
+  // string ELF section. I hope to god it does, at least. Or, one could resolve to linkage name here to be
+  // *exactly* sure that we resolve this. Probably better?
+  mObjectRef.ForEachStructOrClassType(
+    type->mName, true, [type, &declarationDieContext, this](sym::Type *candidateType) {
+      if (candidateType == type) {
+        return true;
+      }
+
+      const auto candidateDieRef = candidateType->mCompUnitDieReference->ToDieReference();
+      const TypeDIEContext definitionDieContext = TypeDIEContext::Create(candidateDieRef);
+
+      if (declarationDieContext.TypeContextMatches(definitionDieContext)) {
+        mObjectRef.GetTypeStorage()->AddType(candidateDieRef.SectionOffset(), candidateType);
+        type->mTypeChain = candidateType;
+        return false;
+      }
+
+      return true;
+    });
 }
 
 void
 TypeSymbolicationContext::ResolveType() noexcept
 {
-  sym::Type *typeIter = mCurrentType;
+  sym::Type *typeIter = mRequestedTypeDieToResolve;
   while (typeIter != nullptr) {
     if (typeIter->mIsResolved) {
       typeIter = typeIter->mTypeChain;
       continue;
+    }
+    if (typeIter->mIsDeclaration) {
+      ResolveDeclarationType(typeIter);
+      // At this point, the declaration die, shall have the actual defined type in it's type chain.
+      // We shall also, have overwritten the declaration die in the type storage, so anybody referencing a Type*
+      // via that offset, will now actually get the defined Type* directly. However, any type accessing Type* via
+      // the type chain, will have to iterate past the declaration type in the type chain, as we can't fixup these.
+      // This is fine for now, but not optimal, it's an additional check needed when doing operations requiring
+      // types. Note that I have no idea on how to implement this better atm because I've spent on it.
+
+      if (!typeIter->mTypeChain) {
+        DBGLOG(core,
+          "Found no definition die for declaration die 0x{:x}, setting as resolved still.",
+          typeIter->mCompUnitDieReference->ToDieReference().GetDie()->mSectionOffset);
+        typeIter->mIsResolved = true;
+        return;
+      }
+
+      typeIter->mIsResolved = true;
+
+      typeIter = mRequestedTypeDieToResolve = typeIter->mTypeChain;
+      if (typeIter->IsResolved()) {
+        // Definition type die has already been parsed.
+        return;
+      }
+      // Now resolve the actual definition die
     }
     UnitData *cu = typeIter->mCompUnitDieReference->GetUnitData();
     const DieMetaData *die = typeIter->mCompUnitDieReference.mut().GetDie();

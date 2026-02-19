@@ -40,11 +40,23 @@ struct DieMetaData;
 
 class TypeStorage
 {
+  friend class sym::dw::TypeSymbolicationContext;
   std::mutex mWriteMutex;
   // The u64 here is offset into the debug information .debug_info section
   // And effectively, a sym::Type* maps to a debug information entry containing a type
   // but that type can be const + another type, and this is where type chains come in.
   std::unordered_map<u64, sym::Type *> mTypeStorage;
+
+  // Types whose die was a declaration die and as such has to be guess-worked into a real DIE somewhere.
+  std::unordered_map<u64, sym::Type *> mDeclarationDieTypes;
+
+  void AddType(u64 sectionOffset, sym::Type *type);
+
+  // Create Type object from a die that is a qualifier-DIE (so it's a const, or a volatile etc)
+  sym::Type *CreateTypeFromQualifiedTypeDie(sym::dw::DieReference dieRef);
+  sym::Type *CreateTypeFromDeclarationDie(sym::dw::DieReference dieRef);
+  sym::Type *CreateTypeFromTypeSignatureDie(sym::dw::DieReference dieRef, u64 typeSignature);
+  sym::Type *CreateTypeFallback(sym::dw::DieReference dieRef);
 
 public:
   static std::unique_ptr<TypeStorage> Create() noexcept;
@@ -56,8 +68,16 @@ public:
    * and they all have an additional level of indirection, pointing to the "Foo" class type/struct type die.
    * This has multiple problems, first of all, when we run into a Foo*, we must make sure that Foo also exist
    * before we return Foo* here, because the target type will be defined by Foo. */
-  sym::Type *GetOrCreateNewType(sym::dw::IndexedDieReference dieReference) noexcept;
+  sym::Type *GetOrCreateNewType(sym::dw::IndexedDieReference indexedDieRef) noexcept;
+
+  /** The synthetic empty type, used to signal no type. */
   sym::Type *GetUnitType() noexcept;
+
+  /**
+   * Creates a new type and is used during name indexing which is a configuration step that runs when indexing an
+   * object file. After indexing, new types are created on demand when we need to parse the symbol information and
+   * during that phase (actual debugging), `GetOrCreateNewType` is instead used.
+   */
   sym::Type *CreateNewType(DwarfTag tag,
     Offset typeDieOffset,
     sym::dw::IndexedDieReference dieReference,
@@ -185,6 +205,8 @@ struct Field
 {
   NonNullPtr<Type> mType;
   Immutable<u32> mObjectBaseOffset;
+  Immutable<u32> mFieldOffset;
+  Immutable<u16> mBitFieldSize;
   Immutable<std::string_view> mName;
 };
 
@@ -297,6 +319,7 @@ private:
   // Flags used when constructing and "realizing" a type from the debug info data.
   bool mIsResolved;
   bool mIsProcessing;
+  bool mIsDeclaration{ false };
 
   friend class TypeSymbolicationContext;
   Type *mTypeChain;
@@ -332,6 +355,17 @@ public:
   Type *ResolveAlias() noexcept;
   void SetBaseTypeEncoding(BaseTypeEncoding enc) noexcept;
   bool SetProcessing() noexcept;
+  void SetIsDeclaration() noexcept;
+
+  Type *
+  SkipJunk()
+  {
+    if (mIsDeclaration) {
+      return mTypeChain;
+    }
+    return this;
+  }
+
   NonNullPtr<Type> GetTargetType() noexcept;
   // Walks the `type_chain` and if _any_ of the types in between this type element and the base target type is a
   // reference, so is this. this is because we can have something like const Foo&, which is 3 `Type`s, (const+, &+,

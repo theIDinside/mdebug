@@ -149,7 +149,7 @@ ResolverRegistry::OnNewSymbolFile(SymbolFile *symbolFile)
 {
   for (const auto &resolver : mResolvers) {
     symbolFile->ForEachTypeMatching(
-      resolver->mResolverPattern, [&](sym::Type *matchedType) { SetResolverFor(matchedType, resolver); });
+      resolver->mResolverPattern, false, [&](sym::Type *matchedType) { SetResolverFor(matchedType, resolver); });
   }
 }
 
@@ -162,7 +162,7 @@ ResolverRegistry::RegisterResolver(std::string resolverName, std::string resolve
   Tracer::ForEachObjectFile([&](ObjectFile &obj) {
     DBGLOG(core, "Register resolver {} with {}", entry->mResolverName, obj.GetPathString());
     obj.ForEachTypeMatching(
-      entry->mResolverPattern, [&](sym::Type *matchedType) { SetResolverFor(matchedType, entry); });
+      entry->mResolverPattern, false, [&](sym::Type *matchedType) { SetResolverFor(matchedType, entry); });
     return true;
   });
 

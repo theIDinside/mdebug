@@ -294,9 +294,9 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *) noexcept
       case DwarfTag::DW_TAG_variable:
         // We only register global variables, everything else wouldn't make sense.
         if (name && hasLocation && isSuperScopeVariable) {
-          globalVariables.push_back({ name, dieIndex, compileUnit });
+          globalVariables.emplace_back(name, dieIndex, compileUnit);
           if (mangledName && mangledName != name) {
-            globalVariables.push_back({ mangledName, dieIndex, compileUnit });
+            globalVariables.emplace_back(mangledName, dieIndex, compileUnit);
           }
         }
         break;
@@ -312,10 +312,10 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *) noexcept
       case DwarfTag::DW_TAG_union_type:
       case DwarfTag::DW_TAG_unspecified_type: {
         if (name && !isDecl) {
-          types.push_back({ name, dieIndex, compileUnit, 0 });
+          types.emplace_back(name, dieIndex, compileUnit, 0);
         }
         if (mangledName && !isDecl) {
-          types.push_back({ mangledName, dieIndex, compileUnit, 0 });
+          types.emplace_back(mangledName, dieIndex, compileUnit, 0);
         }
       } break;
       case DwarfTag::DW_TAG_inlined_subroutine: // 0x1d 0x2e

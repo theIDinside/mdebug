@@ -95,6 +95,7 @@ struct DieMetaData
   const DieMetaData *Sibling() const noexcept;
   const DieMetaData *GetChildren() const noexcept;
   bool IsSuperScopeVariable() const noexcept;
+  bool TypeDieIsDeclaration() const noexcept;
 
   // sets the parent's offset relative to this die in the vector containing all dies
   // thus, giving the ability to calculate parent by saying DebugInfoEntry* parent = (this - p_id);
@@ -169,8 +170,9 @@ public:
     return mBuildDirectory != nullptr;
   }
 
-private:
   void LoadDieMetadata() noexcept;
+
+private:
   ObjectFile *mObjectFile;
   UnitHeader mUnitHeader;
   // The Compilation unit die (i.e. the die with DW_TAG_compile_unit; also the first DIE found in `dies` - but as

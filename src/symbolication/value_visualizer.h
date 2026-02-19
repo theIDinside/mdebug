@@ -85,6 +85,8 @@ public:
     std::string_view name,
     u64 variablesReference,
     std::pmr::memory_resource *allocator) noexcept = 0;
+
+  [[nodiscard]] virtual std::string_view SerializerType() const = 0;
 };
 
 class PrimitiveSerializer final : public DebugAdapterSerializer
@@ -98,6 +100,12 @@ public:
     std::string_view name,
     u64 variablesReference,
     std::pmr::memory_resource *allocator) noexcept final;
+
+  [[nodiscard]] std::string_view
+  SerializerType() const override
+  {
+    return "PrimitiveSerializer";
+  }
 };
 
 class DefaultStructSerializer final : public DebugAdapterSerializer
@@ -108,6 +116,11 @@ public:
     std::string_view name,
     u64 variablesReference,
     std::pmr::memory_resource *allocator) noexcept final;
+  [[nodiscard]] std::string_view
+  SerializerType() const override
+  {
+    return "DefaultStructSerializer";
+  }
 };
 
 class InvalidValueSerializer final : public DebugAdapterSerializer
@@ -117,6 +130,12 @@ public:
     std::string_view name,
     u64 variablesReference,
     std::pmr::memory_resource *allocator) noexcept final;
+
+  [[nodiscard]] std::string_view
+  SerializerType() const override
+  {
+    return "InvalidValueSerializer";
+  }
 };
 
 class ArraySerializer final : public DebugAdapterSerializer
@@ -126,6 +145,12 @@ public:
     std::string_view name,
     u64 variablesReference,
     std::pmr::memory_resource *allocator) noexcept final;
+
+  [[nodiscard]] std::string_view
+  SerializerType() const override
+  {
+    return "ArraySerializer";
+  }
 };
 
 class CStringSerializer final : public DebugAdapterSerializer
@@ -138,6 +163,12 @@ public:
     std::string_view name,
     u64 variablesReference,
     std::pmr::memory_resource *allocator) noexcept final;
+
+  [[nodiscard]] std::string_view
+  SerializerType() const override
+  {
+    return "CStringSerializer";
+  }
 };
 
 struct SerializeOptions

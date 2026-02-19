@@ -148,11 +148,7 @@ class Value
 public:
   ~Value() noexcept;
 
-  void
-  SetDapSerializer(DebugAdapterSerializer *serializer) noexcept
-  {
-    mVisualizer = serializer;
-  }
+  void SetDapSerializer(DebugAdapterSerializer *serializer) noexcept;
 
   AddrPtr Address() const noexcept;
   Type *GetType() const noexcept;
@@ -181,6 +177,7 @@ public:
 
   [[nodiscard]] bool HasVisualizer() const noexcept;
   DebugAdapterSerializer *GetSerializer() noexcept;
+
   [[nodiscard]] bool IsValidValue() const noexcept;
   bool HasMember(std::string_view memberName) const noexcept;
   Ref<Value> GetMember(std::string_view memberName) noexcept;

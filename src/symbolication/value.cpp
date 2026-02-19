@@ -50,6 +50,12 @@ Value::SetKind(SyntheticType type) noexcept
   uSynthetic = type;
 }
 
+void
+Value::SetDapSerializer(DebugAdapterSerializer *serializer) noexcept
+{
+  mVisualizer = serializer;
+}
+
 Type *
 Value::EnsureTypeResolved() const noexcept
 {
@@ -60,7 +66,7 @@ Value::EnsureTypeResolved() const noexcept
       *type };
     typeResolver.ResolveType();
   }
-  return type;
+  return type->SkipJunk()->ResolveAlias();
 }
 
 Value::Value(VarContext context,

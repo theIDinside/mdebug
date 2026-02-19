@@ -181,8 +181,7 @@ UnitData::IsCompilationUnitLike() const noexcept
 }
 
 UnitData::UnitData(ObjectFile *owning_objfile, UnitHeader header) noexcept
-    : mObjectFile(owning_objfile), mUnitHeader(header), mUnitDie(), mDieCollection(), mFullyLoaded(false),
-      mLoadedDiesCount(0), mAbbreviation(), mLoadDiesMutex{}
+    : mObjectFile(owning_objfile), mUnitHeader(header), mUnitDie(), mFullyLoaded(false), mLoadedDiesCount(0)
 {
 }
 
@@ -268,7 +267,7 @@ UnitData::IndexOf(const DieMetaData *die) noexcept
 {
   MDB_ASSERT(
     die != nullptr && !mDieCollection.empty(), "You passed a nullptr or DIE's for this unit has not been loaded");
-  auto begin = mDieCollection.data();
+  DieMetaData *begin = mDieCollection.data();
   return die - begin;
 }
 

@@ -2401,7 +2401,6 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
 {
   PROFILE_SCOPE_ARGS("VariablesResponse", "command", PEARG("seq", int64_t{ seq }));
   std::pmr::string result{ arenaAllocator };
-  result.reserve(256 + (256 * mVariables.size()));
   if (mVariables.empty()) {
     std::format_to(std::back_inserter(result),
       R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"variables","body":{{"variables":[]}}}})",
@@ -2411,21 +2410,21 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
     return result;
   }
   std::pmr::string variables_contents{ arenaAllocator };
-  variables_contents.reserve(256 * variables_contents.size());
+  variables_contents.reserve(256 * mVariables.size());
   auto it = std::back_inserter(variables_contents);
   for (const auto &v : mVariables) {
     if (auto *datvis = v->GetSerializer(); datvis != nullptr) {
-
-      auto opt = datvis->Serialize(*v, v->mName, v->ReferenceId(), arenaAllocator);
+      auto opt = datvis->Serialize(*v, v->mName, v->ReferenceId(), std::pmr::new_delete_resource());
       if (opt) {
         it = std::format_to(it, "{},", *opt);
       } else {
         std::format_to(std::back_inserter(result),
-          R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"variables","message":"visualizer failed","body":{{"error":{{"id": -1, "format": "Could not visualize value for '{}'"}} }} }})",
+          R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":false,"command":"variables","message":"serializer failed","body":{{"error":{{"id": -1, "format": "Could not serializer value for '{}:{}'"}} }} }})",
           seq,
           mRequestSeq,
           mProcessId,
-          v->mName);
+          v->mName,
+          v->EnsureTypeResolved()->mName);
         return result;
       }
     } else {
@@ -2450,6 +2449,8 @@ VariablesResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator)
   }
 
   variables_contents.pop_back();
+
+  result.reserve(512 + variables_contents.size());
 
   std::format_to(std::back_inserter(result),
     R"({{"seq":{},"request_seq":{},"processId":{},"type":"response","success":true,"command":"variables","body":{{"variables":[{}]}}}})",

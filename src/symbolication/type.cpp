@@ -17,7 +17,7 @@
 
 namespace mdb {
 static constexpr bool
-IsNotCompleteTypeDie(const sym::dw::DieMetaData *die)
+TypeHasQualifierOrIsReferenceLike(const sym::dw::DieMetaData *die)
 {
   switch (die->mTag) {
   case DwarfTag::DW_TAG_pointer_type:
@@ -154,74 +154,123 @@ ResolveArrayBounds(sym::dw::DieReference array_die) noexcept
   return 0;
 }
 
-sym::Type *
-TypeStorage::GetOrCreateNewType(sym::dw::IndexedDieReference die_ref) noexcept
+void
+TypeStorage::AddType(u64 sectionOffset, sym::Type *type)
 {
-  const sym::dw::DieReference this_ref{ die_ref.GetUnitData(), die_ref.GetDie() };
-  const auto type_id = this_ref.GetDie()->mSectionOffset;
+  mTypeStorage[sectionOffset] = type;
+}
 
-  if (mTypeStorage.contains(type_id)) {
-    auto t = mTypeStorage[type_id];
+sym::Type *
+TypeStorage::CreateTypeFromQualifiedTypeDie(sym::dw::DieReference dieRef)
+{
+  using DieReference = sym::dw::DieReference;
+
+  const auto attr = dieRef.ReadAttribute(Attribute::DW_AT_type);
+  sym::Type *baseType =
+    attr.transform(AttributeValue::AsUnsigned)
+      .and_then(
+        [&](auto offset) { return dieRef.GetUnitData()->GetObjectFile()->GetDebugInfoEntryReference(offset); })
+      .transform([this](DieReference referencedDie) { return GetOrCreateNewType(referencedDie.AsIndexed()); })
+      .or_else([this]() -> std::optional<sym::Type *> { return GetUnitType(); })
+      .value();
+  auto size = 0U;
+  auto arrayBounds = 0U;
+  // TODO(simon): We only support 64-bit machines right now. Therefore all non-value types/reference-like types
+  // are 8 bytes large
+  if (sym::IsReferenceLike(dieRef.GetDie()) || baseType->IsReference()) {
+    if (dieRef.GetDie()->mTag == DwarfTag::DW_TAG_array_type) {
+      arrayBounds = ResolveArrayBounds(dieRef);
+    }
+    size = REFERENCE_SIZE;
+  } else {
+    size = baseType->Size();
+  }
+
+  auto *type = new sym::Type{
+    dieRef.GetDie()->mTag, dieRef.AsIndexed(), size, baseType, dieRef.GetDie()->mTag == DwarfTag::DW_TAG_typedef
+  };
+  type->SetArrayBounds(arrayBounds);
+  AddType(dieRef.GetDie()->mSectionOffset, type);
+  return type;
+}
+
+sym::Type *
+TypeStorage::CreateTypeFromDeclarationDie(sym::dw::DieReference dieRef)
+{
+  const u64 size =
+    dieRef.ReadAttribute(Attribute::DW_AT_byte_size).transform(&AttributeValue::AsUnsigned).value_or(0);
+
+  const auto name = dieRef.ReadAttribute(Attribute::DW_AT_name).transform(AttributeValue::ToStringView);
+
+  if (!name.has_value()) {
+    DBGLOG(core, "declaration die 0x{:x} had no name attribute", dieRef.GetDie()->mSectionOffset);
+    return nullptr;
+  }
+
+  auto *type = new sym::Type{ dieRef.GetDie()->mTag, dieRef.AsIndexed(), static_cast<u32>(size), *name };
+  type->SetIsDeclaration();
+  AddType(dieRef.GetDie()->mSectionOffset, type);
+  return type;
+}
+
+sym::Type *
+TypeStorage::CreateTypeFromTypeSignatureDie(sym::dw::DieReference dieRef, u64 typeSignature)
+{
+  // DWARF5 support; we might run into type units, therefore we have to resolve the *actual* die we want here
+  // yet we still want to map this_ref's die offset to the type. This is unfortunate, since we might get
+  // "copies" i.e. mulitple die's that have a ref signature. The actual backing data is just 1 of though, so it
+  // just means mulitple keys can reach the value, which is a pointer to the actual type.
+  sym::dw::DieReference typeUnitDieRef =
+    dieRef.GetUnitData()->GetObjectFile()->GetTypeUnitTypeDebugInfoEntry(typeSignature);
+  MDB_ASSERT(typeUnitDieRef.IsValid(), "expected die reference to type unit to be valid");
+  const u32 sz = typeUnitDieRef.ReadAttribute(Attribute::DW_AT_byte_size)->AsUnsignedValue();
+  const auto name = typeUnitDieRef.ReadAttribute(Attribute::DW_AT_name)
+                      .transform(AttributeValue::ToStringView)
+                      .value_or("<no name>");
+  auto *type = new sym::Type{ dieRef.GetDie()->mTag, typeUnitDieRef.AsIndexed(), sz, name };
+  AddType(dieRef.GetDie()->mSectionOffset, type);
+  return type;
+}
+
+sym::Type *
+TypeStorage::CreateTypeFallback(sym::dw::DieReference dieRef)
+{
+  // lambdas have no assigned type name in DWARF (C++). That's just nutter butter shit.
+  // Like come on dog. Give it a bogus name, whatever really. But nothing?
+  const auto name = dieRef.ReadAttribute(Attribute::DW_AT_name)
+                      .transform([](const auto &v) { return v.AsStringView(); })
+                      .value_or("lambda");
+  const u32 sz =
+    dieRef.ReadAttribute(Attribute::DW_AT_byte_size).transform(AttributeValue::AsUnsigned).value_or(0);
+  auto *type = new sym::Type{ dieRef.GetDie()->mTag, dieRef.AsIndexed(), sz, name };
+  AddType(dieRef.GetDie()->mSectionOffset, type);
+  return type;
+}
+
+sym::Type *
+TypeStorage::GetOrCreateNewType(sym::dw::IndexedDieReference indexedDieRef) noexcept
+{
+  const sym::dw::DieReference dieRef{ indexedDieRef.GetUnitData(), indexedDieRef.GetDie() };
+  const auto typeId = dieRef.GetDie()->mSectionOffset;
+
+  if (mTypeStorage.contains(typeId)) {
+    auto *t = mTypeStorage[typeId];
     return t;
   }
 
-  if (IsNotCompleteTypeDie(this_ref.GetDie())) {
-    const auto attr = this_ref.ReadAttribute(Attribute::DW_AT_type);
-    auto base_type =
-      attr.transform([](auto v) { return v.AsUnsignedValue(); })
-        .and_then(
-          [&](auto offset) { return die_ref.GetUnitData()->GetObjectFile()->GetDebugInfoEntryReference(offset); })
-        .transform([this](auto other_cu_die) { return GetOrCreateNewType(other_cu_die.AsIndexed()); })
-        .or_else([this]() -> std::optional<sym::Type *> { return GetUnitType(); })
-        .value();
-    auto size = 0u;
-    auto array_bounds = 0u;
-    // TODO(simon): We only support 64-bit machines right now. Therefore all non-value types/reference-like types
-    // are 8 bytes large
-    if (sym::IsReferenceLike(this_ref.GetDie()) || base_type->IsReference()) {
-      if (this_ref.GetDie()->mTag == DwarfTag::DW_TAG_array_type) {
-        array_bounds = ResolveArrayBounds(this_ref);
-      }
-      size = REFERENCE_SIZE;
-    } else {
-      size = base_type->Size();
-    }
-
-    auto type = new sym::Type{
-      this_ref.GetDie()->mTag, die_ref, size, base_type, this_ref.GetDie()->mTag == DwarfTag::DW_TAG_typedef
-    };
-    type->SetArrayBounds(array_bounds);
-    mTypeStorage[this_ref.GetDie()->mSectionOffset] = type;
-    return type;
-  } else {
-    if (const auto &attr_val = this_ref.ReadAttribute(Attribute::DW_AT_signature); attr_val) {
-      // DWARF5 support; we might run into type units, therefore we have to resolve the *actual* die we want here
-      // yet we still want to map this_ref's die offset to the type. This is unfortunate, since we might get
-      // "copies" i.e. mulitple die's that have a ref signature. The actual backing data is just 1 of though, so it
-      // just means mulitple keys can reach the value, which is a pointer to the actual type.
-      auto tu_die_ref =
-        this_ref.GetUnitData()->GetObjectFile()->GetTypeUnitTypeDebugInfoEntry(attr_val->AsUnsignedValue());
-      MDB_ASSERT(tu_die_ref.IsValid(), "expected die reference to type unit to be valid");
-      const u32 sz = tu_die_ref.ReadAttribute(Attribute::DW_AT_byte_size)->AsUnsignedValue();
-      const auto name = tu_die_ref.ReadAttribute(Attribute::DW_AT_name)
-                          .transform(AttributeValue::ToStringView)
-                          .value_or("<no name>");
-      auto type = new sym::Type{ this_ref.GetDie()->mTag, tu_die_ref.AsIndexed(), sz, name };
-      mTypeStorage[this_ref.GetDie()->mSectionOffset] = type;
-      return type;
-    } else {
-      // lambdas have no assigned type name in DWARF (C++). That's just nutter butter shit.
-      // Like come on dog. Give it a bogus name, whatever really. But nothing?
-      const auto name = this_ref.ReadAttribute(Attribute::DW_AT_name)
-                          .transform([](auto v) { return v.AsStringView(); })
-                          .value_or("lambda");
-      const u32 sz =
-        this_ref.ReadAttribute(Attribute::DW_AT_byte_size).transform(AttributeValue::AsUnsigned).value_or(0);
-      auto type = new sym::Type{ this_ref.GetDie()->mTag, die_ref, sz, name };
-      mTypeStorage[this_ref.GetDie()->mSectionOffset] = type;
-      return type;
-    }
+  if (TypeHasQualifierOrIsReferenceLike(dieRef.GetDie())) {
+    return CreateTypeFromQualifiedTypeDie(dieRef);
   }
+
+  // *maybe* an opaque type, but most likely just a forward declaration (or something like it.)
+  if (dieRef.TypeDieIsDeclaration()) {
+    return CreateTypeFromDeclarationDie(dieRef);
+  }
+
+  if (const auto &attributeValue = dieRef.ReadAttribute(Attribute::DW_AT_signature); attributeValue) {
+    return CreateTypeFromTypeSignatureDie(dieRef, attributeValue->AsUnsignedValue());
+  }
+  return CreateTypeFallback(dieRef);
 }
 
 sym::Type *
@@ -301,7 +350,7 @@ Type::Type(DwarfTag debugInfoEntryTag,
   bool isTypedef) noexcept
     : mName(target->mName), mCompUnitDieReference(debugInfoEntryReference),
       mModifier{ ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->mTag) }, mIsTypedef(isTypedef),
-      size_of(sizeOf), mIsResolved(false), mIsProcessing(false), mTypeChain(target), mFields(), mBaseType(),
+      size_of(sizeOf), mIsResolved(false), mIsProcessing(false), mTypeChain(target),
       mDebugInfoEntryTag(debugInfoEntryTag)
 {
 }
@@ -312,14 +361,14 @@ Type::Type(DwarfTag debugInfoEntryTag,
   std::string_view name) noexcept
     : mName(name), mCompUnitDieReference(debugInfoEntryReference),
       mModifier{ ToTypeModifierWillPanic(debugInfoEntryReference.GetDie()->mTag) }, mIsTypedef(false),
-      size_of(sizeOf), mIsResolved(false), mIsProcessing(false), mTypeChain(nullptr), mFields(), mBaseType(),
+      size_of(sizeOf), mIsResolved(false), mIsProcessing(false), mTypeChain(nullptr),
       mDebugInfoEntryTag(debugInfoEntryTag)
 {
 }
 
 Type::Type(std::string_view name, size_t size) noexcept
-    : mName(name), mCompUnitDieReference(), mModifier(Modifier::None), mIsTypedef(false), size_of(size),
-      mIsResolved(true), mIsProcessing(false), mTypeChain(nullptr), mFields(), mBaseType()
+    : mName(name), mModifier(Modifier::None), mIsTypedef(false), size_of(size), mIsResolved(true),
+      mIsProcessing(false), mTypeChain(nullptr)
 {
 }
 
@@ -348,6 +397,12 @@ void
 Type::SetBaseTypeEncoding(BaseTypeEncoding enc) noexcept
 {
   mBaseType = enc;
+}
+
+void
+Type::SetIsDeclaration() noexcept
+{
+  mIsDeclaration = true;
 }
 
 NonNullPtr<Type>
@@ -406,11 +461,10 @@ Type::SizeBytes() noexcept
 {
   if (mModifier == Modifier::Array) {
     auto bounds = Size();
-    auto layout_type_size = TypeDescribingLayoutOfThis()->Size();
+    auto layout_type_size = TypeDescribingLayoutOfThis()->SkipJunk()->Size();
     return bounds * layout_type_size;
-  } else {
-    return Size();
   }
+  return Size();
 }
 
 std::optional<BaseTypeEncoding>
@@ -507,7 +561,7 @@ Type::TypeDescribingLayoutOfThis() noexcept
   // side effect, making type aliases behave as their own types, instead of just names.
 
   if (mModifier == Modifier::None && !mIsTypedef) {
-    return this;
+    return SkipJunk();
   }
 
   Type *t = ResolveAlias();
@@ -516,7 +570,7 @@ Type::TypeDescribingLayoutOfThis() noexcept
     t = t->mTypeChain->ResolveAlias();
   }
 
-  return t;
+  return t->SkipJunk();
 }
 
 void

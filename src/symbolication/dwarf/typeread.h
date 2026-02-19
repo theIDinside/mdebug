@@ -42,18 +42,48 @@ public:
   void ProcessSymbolInformation() noexcept;
 };
 
+struct DieContextEntry
+{
+  DwarfTag mTag;
+  DieReference mDie;
+};
+
+/** The DIE context for a type. Effectively it is the path from the DIE defininig the type up to the top-most
+ * parent that is not a DWARF unit type */
+class TypeDIEContext
+{
+  DwarfTag mTag;
+  // goes from closest-to-mDie to root
+  std::vector<DieContextEntry> mAncestorDies;
+  void Reserve(size_t size);
+
+  bool operator==(const TypeDIEContext &rhs) const;
+
+public:
+  explicit TypeDIEContext(DwarfTag tag);
+  void AppendDie(DieReference dieRef);
+  static TypeDIEContext Create(DieReference dieRef);
+  bool TypeContextMatches(const TypeDIEContext &other) const;
+};
+
 class TypeSymbolicationContext
 {
+  // The object file whose debug information we're parsing from
   ObjectFile &mObjectRef;
-  std::vector<Field> mTypeFields;
-  sym::Type *mCurrentType;
 
+  // The currently built state for resolving the type we're building.
+  std::vector<Field> mTypeFields;
+  // The type being built
+  sym::Type *mRequestedTypeDieToResolve;
   sym::Type *mEnumerationType{ nullptr };
   bool mEnumIsSigned{ false };
-  std::vector<EnumeratorConstValue> mConstValues{};
+  std::vector<EnumeratorConstValue> mConstValues;
+
   void ProcessMemberVariable(DieReference die) noexcept;
   void ProcessInheritanceDie(DieReference die) noexcept;
   void ProcessEnumDie(DieReference die) noexcept;
+
+  void ResolveDeclarationType(sym::Type *type);
 
 public:
   TypeSymbolicationContext(ObjectFile &object_file, Type &type) noexcept;

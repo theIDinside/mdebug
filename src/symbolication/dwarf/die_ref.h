@@ -37,6 +37,9 @@ public:
   const DieMetaData *GetDie() const noexcept;
   DieReference MaybeResolveReference() const noexcept;
   u64 IndexOfDie() const noexcept;
+  u64 SectionOffset() const noexcept;
+
+  bool TypeDieIsDeclaration() const noexcept;
 
   const AbbreviationInfo &GetAbbreviation() const noexcept;
 
@@ -44,6 +47,8 @@ public:
   IndexedDieReference AsIndexed() const noexcept;
   std::optional<AttributeValue> ReadAttribute(Attribute attr) const noexcept;
   UnitReader GetReader() const noexcept;
+
+  std::optional<DieReference> GetParent() const;
 };
 
 class IndexedDieReference
@@ -60,6 +65,8 @@ public:
   UnitData *GetUnitData() const noexcept;
   u64 GetIndex() const noexcept;
   const DieMetaData *GetDie() noexcept;
+
+  DieReference ToDieReference() const;
 
   friend constexpr auto
   operator==(const auto &lhs, const auto &rhs)

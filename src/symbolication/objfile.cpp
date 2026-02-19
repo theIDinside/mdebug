@@ -673,18 +673,91 @@ ObjectFile::SearchDebugSymbolStringTable(const std::string &regex) const noexcep
 }
 
 auto
-ObjectFile::ForEachTypeMatching(std::string_view pattern, const std::function<void(sym::Type *type)> &onEachType)
-  -> void
+ObjectFile::ForEachStructOrClassType(
+  std::string_view pattern, bool exactPattern, const std::function<bool(sym::Type *type)> &onEachType) -> void
 {
   // Step 1: Search ELF string sections for matching strings using regex
-  std::vector<std::string> matchedStrings = SearchDebugSymbolStringTable(std::string{ pattern });
+  std::vector<std::string> matchedStrings;
 
-  // If no matches found in the string table, return early
+  if (!exactPattern) {
+    matchedStrings = SearchDebugSymbolStringTable(std::string{ pattern });
+  } else {
+    matchedStrings.emplace_back(pattern);
+  }
+
   if (matchedStrings.empty()) {
     return;
   }
 
-  // Step 2: Search NameIndexShards for each matched string to find DieNameReferences
+  auto *nameIndex = GetNameIndex();
+  std::vector<sym::dw::DieNameReference> dieReferences;
+
+  std::unordered_set<sym::dw::UnitData *> compUnitsNeedingLoad;
+
+  for (const auto &matchedName : matchedStrings) {
+    nameIndex->ForEachType(matchedName, [&](const sym::dw::DieNameReference &ref) {
+      if (!ref.cu->HasLoadedDies()) {
+        compUnitsNeedingLoad.insert(ref.cu);
+      }
+      dieReferences.push_back(ref);
+    });
+  }
+
+  if (compUnitsNeedingLoad.size() > 16) {
+    DBGLOG(core,
+      "Needing more than 16 compilation units who are not loaded into memory. Parallel task spawning not yet "
+      "implemented.");
+  }
+
+  auto typeStorage = GetTypeStorage();
+  std::unordered_set<sym::Type *> foundTypes;
+
+  for (const auto &dieRef : dieReferences) {
+    auto dieReference = dieRef.cu->GetDieByCacheIndex(dieRef.die_index);
+    const auto *die = dieReference.GetDie();
+
+    if (!die) {
+      continue;
+    }
+
+    const auto tag = die->mTag;
+    switch (tag) {
+    case DwarfTag::DW_TAG_structure_type:
+    case DwarfTag::DW_TAG_class_type:
+      break;
+    default:
+      continue;
+    }
+
+    const u64 dieOffset = die->mSectionOffset;
+    sym::Type *type = typeStorage->FindTypeByOffset(dieOffset);
+
+    if (type != nullptr) {
+      if (foundTypes.insert(type).second) {
+        if (!onEachType(type)) {
+          return;
+        }
+      }
+    }
+  }
+}
+
+auto
+ObjectFile::ForEachTypeMatching(
+  std::string_view pattern, bool exactPattern, const std::function<void(sym::Type *type)> &onEachType) -> void
+{
+  std::vector<std::string> matchedStrings;
+
+  if (!exactPattern) {
+    matchedStrings = SearchDebugSymbolStringTable(std::string{ pattern });
+  } else {
+    matchedStrings.emplace_back(pattern);
+  }
+
+  if (matchedStrings.empty()) {
+    return;
+  }
+
   auto *nameIndex = GetNameIndex();
   std::vector<sym::dw::DieNameReference> dieReferences;
 
@@ -693,12 +766,10 @@ ObjectFile::ForEachTypeMatching(std::string_view pattern, const std::function<vo
       matchedName, [&](const sym::dw::DieNameReference &ref) { dieReferences.push_back(ref); });
   }
 
-  // Step 3: For each DieNameReference, lookup the DIE and check if it's a type
   auto typeStorage = GetTypeStorage();
   std::unordered_set<sym::Type *> foundTypes; // Use set to avoid duplicates
 
   for (const auto &dieRef : dieReferences) {
-    // Get the DIE from the reference
     auto dieReference = dieRef.cu->GetDieByCacheIndex(dieRef.die_index);
     const auto *die = dieReference.GetDie();
 
@@ -706,33 +777,11 @@ ObjectFile::ForEachTypeMatching(std::string_view pattern, const std::function<vo
       continue;
     }
 
-    // Check if this DIE is a type by examining its tag
-    const auto tag = die->mTag;
-    const bool isType = tag == DwarfTag::DW_TAG_base_type || tag == DwarfTag::DW_TAG_class_type ||
-                        tag == DwarfTag::DW_TAG_structure_type || tag == DwarfTag::DW_TAG_union_type ||
-                        tag == DwarfTag::DW_TAG_enumeration_type || tag == DwarfTag::DW_TAG_typedef ||
-                        tag == DwarfTag::DW_TAG_pointer_type || tag == DwarfTag::DW_TAG_reference_type ||
-                        tag == DwarfTag::DW_TAG_const_type || tag == DwarfTag::DW_TAG_volatile_type ||
-                        tag == DwarfTag::DW_TAG_rvalue_reference_type || tag == DwarfTag::DW_TAG_array_type ||
-                        tag == DwarfTag::DW_TAG_subroutine_type || tag == DwarfTag::DW_TAG_ptr_to_member_type ||
-                        tag == DwarfTag::DW_TAG_set_type || tag == DwarfTag::DW_TAG_subrange_type ||
-                        tag == DwarfTag::DW_TAG_string_type || tag == DwarfTag::DW_TAG_restrict_type ||
-                        tag == DwarfTag::DW_TAG_interface_type || tag == DwarfTag::DW_TAG_unspecified_type ||
-                        tag == DwarfTag::DW_TAG_shared_type || tag == DwarfTag::DW_TAG_atomic_type ||
-                        tag == DwarfTag::DW_TAG_immutable_type || tag == DwarfTag::DW_TAG_packed_type;
-
-    if (!isType) {
-      continue;
-    }
-
-    // Step 4: Lookup the Type* in type storage using the DIE offset
     const u64 dieOffset = die->mSectionOffset;
     sym::Type *type = typeStorage->FindTypeByOffset(dieOffset);
 
     if (type != nullptr) {
-      // Avoid calling the callback multiple times for the same type
       if (foundTypes.insert(type).second) {
-        // Step 5: Apply the callback on each found type
         onEachType(type);
       }
     }
@@ -955,18 +1004,16 @@ SymbolFile::ResolveVariable(
     return {};
   }
 
-  sym::Type *type = value->EnsureTypeResolved();
+  sym::Type *type = value->EnsureTypeResolved()->SkipJunk();
   sym::IValueContentsResolver *resolver = GetCustomResolver(*value);
 
   js::ResolverRegistry *registry = js::Scripting::GetResolverRegistry();
   resolver = registry->GetResolver(type);
 
-  DBGLOG(core, "Found resolver for type {}: {}", type->mName, (void *)resolver);
-
   if (!resolver) {
     resolver = GetStaticResolver(*value);
   }
-
+  DBGLOG(core, "Found resolver for type {}: {}, members={}", type->mName, (void *)resolver, type->MembersCount());
   if (resolver != nullptr) {
     return resolver->Resolve(ctx, { .start = start, .count = count });
   }
@@ -1041,10 +1088,9 @@ SymbolFile::GetTextSection() const noexcept -> const ElfSection *
 
 void
 SymbolFile::ForEachTypeMatching(
-  std::string_view pattern, const std::function<void(sym::Type *type)> &onEachType) const
+  std::string_view pattern, bool exactPattern, const std::function<void(sym::Type *type)> &onEachType) const
 {
-  ObjectFile *obj = GetObjectFile();
-  return obj->ForEachTypeMatching(pattern, onEachType);
+  GetObjectFile()->ForEachTypeMatching(pattern, exactPattern, onEachType);
 }
 
 auto
@@ -1141,7 +1187,7 @@ SymbolFile::GetVariables(sym::FrameVariableKind variablesKind, tc::SupervisorSta
 
     auto variableValue =
       sym::MemoryContentsObject::CreateFrameVariable(tc, frame, const_cast<sym::Symbol &>(symbol), true);
-    GetObjectFile()->SetSerializerFor(*variableValue);
+    ObjectFile::SetSerializerFor(*variableValue);
 
     if (const auto id = variableValue->ReferenceId(); id > 0) {
       variableValue->RegisterContext();

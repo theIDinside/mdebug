@@ -85,6 +85,31 @@ DieReference::IndexOfDie() const noexcept
   return mUnitData->IndexOf(mDebugInfoEntry);
 }
 
+u64
+DieReference::SectionOffset() const noexcept
+{
+  return mDebugInfoEntry->mSectionOffset;
+}
+
+bool
+DieReference::TypeDieIsDeclaration() const noexcept
+{
+  switch (mDebugInfoEntry->mTag) {
+  case DwarfTag::DW_TAG_class_type:
+  case DwarfTag::DW_TAG_structure_type:
+    break;
+  default:
+    return false;
+  }
+
+  if (auto v = ReadAttribute(Attribute::DW_AT_declaration); v.has_value()) {
+    MDB_ASSERT(v->AsUnsignedValue() > 0, "Declaration flag, but 0?");
+    return v->AsUnsignedValue() > 0;
+  }
+
+  return false;
+}
+
 const AbbreviationInfo &
 DieReference::GetAbbreviation() const noexcept
 {
@@ -126,6 +151,16 @@ DieReference::GetReader() const noexcept
   return UnitReader{ mUnitData, *mDebugInfoEntry };
 }
 
+std::optional<DieReference>
+DieReference::GetParent() const
+{
+  const DieMetaData *parent = mDebugInfoEntry->GetParent();
+  if (!parent) {
+    return std::nullopt;
+  }
+  return DieReference{ mUnitData, parent };
+}
+
 std::optional<AttributeValue>
 DieReference::ReadAttribute(Attribute attr) const noexcept
 {
@@ -160,5 +195,12 @@ const DieMetaData *
 IndexedDieReference::GetDie() noexcept
 {
   return &mUnitData->GetDies()[mDieIndex];
+}
+
+DieReference
+IndexedDieReference::ToDieReference() const
+{
+  const DieMetaData *die = const_cast<IndexedDieReference &>(*this).GetDie();
+  return DieReference{ mUnitData, die };
 }
 } // namespace mdb::sym::dw

@@ -205,8 +205,11 @@ public:
    */
   auto SearchDebugSymbolStringTable(const std::string &regex) const noexcept -> std::vector<std::string>;
 
-  auto ForEachTypeMatching(std::string_view pattern, const std::function<void(sym::Type *type)> &onEachType)
-    -> void;
+  auto ForEachTypeMatching(
+    std::string_view pattern, bool exactPattern, const std::function<void(sym::Type *type)> &onEachType) -> void;
+
+  auto ForEachStructOrClassType(
+    std::string_view pattern, bool exactPattern, const std::function<bool(sym::Type *type)> &onEachType) -> void;
 
 private:
   /**
@@ -272,7 +275,8 @@ public:
     -> std::vector<BreakpointLookup>;
   auto GetId() noexcept -> Pid;
   auto GetTextSection() const noexcept -> const ElfSection *;
-  void ForEachTypeMatching(std::string_view pattern, const std::function<void(sym::Type *type)> &onEachType) const;
+  void ForEachTypeMatching(
+    std::string_view pattern, bool exactPattern, const std::function<void(sym::Type *type)> &onEachType) const;
 
 private:
   auto GetVariables(sym::FrameVariableKind variables_kind, tc::SupervisorState &tc, sym::Frame &frame) noexcept

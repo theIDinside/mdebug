@@ -32,16 +32,15 @@ ResolveReference::Resolve(const VariableContext &context, ValueRange valueRange)
   std::vector<Ref<Value>> results;
   auto value = *context.GetValue();
   // actual `T` type behind the reference
-  Type *dereferencedType = value.GetType()->TypeDescribingLayoutOfThis();
+  Type *dereferencedType = value.EnsureTypeResolved()->TypeDescribingLayoutOfThis();
   if (const auto address = value.ToRemotePointer(); address.has_value()) {
     auto adjusted_address = address.value() + (valueRange.start.value_or(0) * dereferencedType->Size());
     const auto requestedLengthInBytes = valueRange.count.value_or(1) * dereferencedType->Size();
     auto memory = sym::MemoryContentsObject::ReadMemory(
       *context.mTask->GetSupervisor(), adjusted_address, requestedLengthInBytes);
     if (!memory.is_ok()) {
-      Type *t = value.GetType()->TypeDescribingLayoutOfThis();
-      results.push_back(
-        Ref<Value>::MakeShared(nullptr, *t, 0U, nullptr, Tracer::GetDataResolver<sym::InvalidValueSerializer>()));
+      results.push_back(Ref<Value>::MakeShared(
+        nullptr, *dereferencedType, 0U, nullptr, Tracer::GetDataResolver<sym::InvalidValueSerializer>()));
       return results;
     }
     auto indirectValueObject = std::make_shared<EagerMemoryContentsObject>(
