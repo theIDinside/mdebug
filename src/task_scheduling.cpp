@@ -452,22 +452,18 @@ TaskScheduler::ReplaySchedule(TaskInfo &task, tc::ProcessedStopEvent eventProcee
   case SchedulingConfig::NormalResume: {
     auto individualScheduler = mIndividualScheduler[task.mTid];
     if (individualScheduler) {
-      DBGLOG(core, "Task has individual scheduler");
       individualScheduler->UpdateStepped();
       const auto stoppedByUser = !eventProceedResult.mShouldResumeAfterProcessing;
       if (individualScheduler->HasCompleted(stoppedByUser)) {
-        DBGLOG(core, "remove scheduler for {}, stopped by user={}", task.mTid, stoppedByUser);
         RemoveIndividualScheduler(task.mTid);
       } else {
         individualScheduler->Proceed();
       }
     } else {
-      DBGLOG(core, "Schedule task {} via ResumeTask", task.mTid);
       mSupervisor->ResumeTask(task, task.mResumeRequest.mType);
     }
   } break;
   case SchedulingConfig::StopAll: {
-    DBGLOG(core, "Don't resume any tasks");
     EmitStopWhenAllTasksHalted();
   } break;
   default:

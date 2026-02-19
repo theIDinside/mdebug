@@ -97,7 +97,6 @@ NameIndex::NameIndexShard *
 NameIndex::CreateShard() noexcept
 {
   std::lock_guard lock(mMutex);
-  DBGLOG(core, "Creating name index shard {} for {}", mNameIndexShards.size(), mName)
   auto &last = mNameIndexShards.emplace_back(std::make_unique<NameIndexShard>());
   return last.get();
 }
@@ -107,7 +106,6 @@ NameIndex::Merge(const std::vector<NameIndex::NameDieTuple> &nameToDieReferences
 {
   PROFILE_SCOPE("NameIndex::Merge", "indexing");
   auto &shard = *CreateShard();
-  DBGLOG(dwarf, "[name index: {}] Adding {} names", mName, nameToDieReferences.size());
   for (const auto &[name, idx, cu] : nameToDieReferences) {
     shard.AddName(name, idx, cu);
   }
@@ -118,7 +116,6 @@ NameIndex::MergeTypes(
   NonNullPtr<TypeStorage> typeStorage, const std::vector<NameTypeDieTuple> &nameToDieReferences) noexcept
 {
   PROFILE_SCOPE_ARGS("NameIndex::MergeTypes", "indexing", PEARG("types", nameToDieReferences.size()));
-  DBGLOG(dwarf, "[name index: {}] Adding {} names", mName, nameToDieReferences.size());
   auto &shard = *CreateShard();
   for (const auto &[name, idx, cu, hash] : nameToDieReferences) {
     shard.AddName(name, idx, cu);

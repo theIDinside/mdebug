@@ -45,7 +45,6 @@ Session::GetThreadName(Tid tid) noexcept
 TaskInfo *
 Session::CreateNewTask(Tid tid, std::optional<std::string_view> name) noexcept
 {
-  DBGLOG(core, "Create new task {}", tid);
   if (auto *t = Tracer::GetSessionTaskMap().Get(tid)) {
     if (!t->IsValid()) {
       t->SetName(name.value_or(std::to_string(tid)));
@@ -179,14 +178,6 @@ Session::HandleEventInReverse(const ReplayEvent &evt) noexcept
 void
 Session::HandleEvent(const ReplayEvent &evt) noexcept
 {
-  DBGBUFLOG(core,
-    "Handle event {} ({}), recorded tid={}, breakpoint={}, stepping complete={}, pc={}",
-    evt.mStopKind,
-    std::to_underlying(evt.mStopKind),
-    evt.mTaskInfo.mRecTid,
-    evt.mHitBreakpoint,
-    evt.mSteppingCompleted,
-    evt.mTaskInfo.mRIP);
 
   // Special case reverse. Reverse should *only* ever stop on breakpoints (non-system bps, so no shared object bps
   // for instance, only user bps) and watchpoints being hit
@@ -228,7 +219,6 @@ Session::HandleEvent(const ReplayEvent &evt) noexcept
     // this is... ugly. But tell the scheduler to resume first, because otherwise it'll just not do anything
     // if it sees the task as exited. This only happens for rr sessions, since a resume resumes the replay, not an
     // individual task.
-    DBGLOG(core, "Schedule for exited...");
     mScheduler->ReplaySchedule(*task, { true, task->mResumeRequest.mType });
     task->SetExited();
   } break;
@@ -250,7 +240,6 @@ Session::HandleEvent(const ReplayEvent &evt) noexcept
       *task, { .mShouldResumeAfterProcessing = true, .mResumeType = task->mResumeRequest.mType });
   } break;
   case StopKind::Signalled: {
-    DBGLOG(core, "Signalled with signal {}", evt.mTaskInfo.mSignal);
     switch (evt.mTaskInfo.mSignal) {
     case SIGTRAP:
       [[fallthrough]];
@@ -281,7 +270,7 @@ Session::AdjustSymbols() noexcept
   }
   mSymbolFiles.clear();
 
-  auto t = GetTaskByTid(TaskLeaderTid());
+  auto *t = GetTaskByTid(TaskLeaderTid());
   CacheRegistersFor(*t);
   mUserBreakpoints.OnExec();
 
@@ -301,7 +290,6 @@ Session::AdjustSymbols() noexcept
   for (auto i = 0u; i < mParsedAuxiliaryVector.mProgramHeaderCount; ++i) {
     if ((cast + i)->p_type == PT_PHDR) {
       baseAddress = mParsedAuxiliaryVector.mProgramHeaderPointer - (cast + i)->p_offset;
-      DBGLOG(core, "Found base address in program header data in loaded binary: {}", baseAddress);
     }
     if ((cast + i)->p_type == PT_DYNAMIC) {
       pt_dynamic = (cast + i);
@@ -310,11 +298,8 @@ Session::AdjustSymbols() noexcept
 
   MDB_ASSERT(pt_dynamic != nullptr, "No dynamic section found.");
   const auto dynamicSegment = baseAddress + pt_dynamic->p_vaddr;
-  DBGLOG(core, "Dynamic segment mapped in at {}", dynamicSegment);
 
   std::string_view exe = mReplaySupervisor->ExecedFile(mTaskLeader);
-
-  DBGLOG(core, "exe for forked process={}", exe);
 
   auto obj = ObjectFile::GetOrCreateObjectFile(exe);
   MDB_ASSERT(obj != nullptr, "Can't recover from error: Main executable binary not found={}", exe);
@@ -326,7 +311,6 @@ Session::AdjustSymbols() noexcept
     MDB_ASSERT(interp->mName == ".interp", "Section is not .interp: {}", interp->mName);
     DwarfBinaryReader reader{ elf, interp->mSectionData };
     const auto path = reader.ReadString();
-    DBGLOG(core, "Path to system interpreter: {}", path);
     return path;
   };
 
@@ -362,16 +346,12 @@ Session::AdjustSymbols() noexcept
   MDB_ASSERT(libs.has_value(), "Failed to read libs");
 
   if (!libs) {
-    DBGLOG(core, "{} could not read libraries", mTaskLeader);
     return;
   }
-
-  DBGLOG(core, "Read {} libraries", libs->size());
 
   for (const auto &lib : *libs) {
     auto symbolFile = CreateSymbolFileIfNew(*this, lib.mPath, lib.mAddress);
     if (symbolFile) {
-      DBGLOG(core, "{}: registring symbol file {}", mTaskLeader, symbolFile->mSymbolObjectFileId);
       RegisterSymbolFile(symbolFile, false);
     }
   }
@@ -472,7 +452,6 @@ Session::SetSourceBreakpoints(
   for (const auto &b : breakpoints) {
     if (!specsForSource.contains(b)) {
       add.push_back(b);
-      DBGLOG(core, "adding spec for source {}", sourceFilePath.c_str());
       specsForSource.emplace(b, sessionBreakpoints->CreateBreakpointInfo());
     }
   }
@@ -573,8 +552,6 @@ Session::UpdateSourceBreakpoints(const std::filesystem::path &sourceFilePath,
       specsForSource.emplace(sourceSpec, mdb::tc::replay::SessionBreakpointSpecs::CreateBreakpointInfo());
     }
   }
-
-  DBGBUFLOG(core, "Add {} source spec'ed user breakpoints", specsForSource.size());
 
   std::set<AddrPtr> addedLocations{};
   for (const auto &symbolFile : mSymbolFiles) {
@@ -740,15 +717,6 @@ Session::DoBreakpointsUpdate(const SymbolFile &newSymbolFile) noexcept
               LocationUserKind::Source,
               desc.Clone());
             bpInfo->AddUser(mTaskLeader);
-            const auto lastSlash = sourceFile.find_last_of('/');
-            const std::string_view fileName =
-              std::string_view{ sourceFile }.substr(lastSlash == std::string_view::npos ? 0 : lastSlash);
-            DBGLOG(core,
-              "[{}:bkpt:source:{}]: added bkpt at {}, (unreloc={})",
-              mTaskLeader,
-              fileName,
-              pc,
-              newSymbolFile.UnrelocateAddress(pc));
           }
         }
       }
@@ -900,9 +868,8 @@ Session::StopTask([[maybe_unused]] TaskInfo &t) noexcept
 }
 
 void
-Session::DoResumeTask(TaskInfo &t, RunType runType) noexcept
+Session::DoResumeTask([[maybe_unused]] TaskInfo &t, RunType runType) noexcept
 {
-  DBGLOG(core, "Attempting to resume task {}, type=", t.mTid, runType);
   mdbrr::ResumeReplay resumeReplay{
     .resume_type = mdbrr::ResumeType::RR_RESUME, .direction = mdbrr::ReplayDirection::RR_DIR_FORWARD, .steps = 1
   };

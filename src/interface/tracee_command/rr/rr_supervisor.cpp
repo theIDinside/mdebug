@@ -992,7 +992,6 @@ ReplaySupervisor::SpawnSupervisorThread() noexcept
     while (!tok.stop_requested()) {
       // wait for start replay command
       if (!mIssuedStartRequest) {
-        DBGLOG(core, "Wait for start to be issued");
         mHasReplayCondVar.wait(lock);
       }
 
@@ -1005,14 +1004,11 @@ ReplaySupervisor::SpawnSupervisorThread() noexcept
         MDB_ASSERT(fs::exists(traceDir), "Expected directory {} to exist", traceDir);
       }
 
-      DBGLOG(core, "Supervisor starting replay...");
       mReplayOptions = StartReplayOptions{ .trace_dir = traceDir.c_str(), .goto_event = 0 };
       InitializeDebugSession();
-      DBGLOG(core, "Replay started!");
       // run actual replay loop
       while (HasSession() && !tok.stop_requested()) {
         WaitForEvent();
-        DBGLOG(core, "processing made rr supervisor requests...");
         ProcessRequests();
       }
     }
