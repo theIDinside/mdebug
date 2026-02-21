@@ -1,14 +1,19 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "symbolication/variable_reference.h"
-#include "tracee_pointer.h"
-#include "utils/immutable.h"
-#include "utils/smartptr.h"
+
+// mdb
 #include <common.h>
+#include <symbolication/type.h>
+#include <symbolication/variable_reference.h>
+#include <tracee_pointer.h>
+#include <utils/byte_buffer.h>
+#include <utils/immutable.h>
+#include <utils/smartptr.h>
+
+// std
 #include <expected>
 #include <memory_resource>
 #include <span>
-#include <utils/byte_buffer.h>
 
 namespace mdb {
 using Bytes = std::span<const u8>;
@@ -144,6 +149,7 @@ class Value
   void SetKind(Field *field) noexcept;
   void SetKind(Type *type) noexcept;
   void SetKind(SyntheticType type) noexcept;
+  bool ValueIsBitField() const noexcept;
 
 public:
   ~Value() noexcept;
@@ -153,6 +159,8 @@ public:
   AddrPtr Address() const noexcept;
   Type *GetType() const noexcept;
   Type *EnsureTypeResolved() const noexcept;
+
+  std::optional<BitField> BitField() const noexcept;
 
   bool
   IsSynthetic() const

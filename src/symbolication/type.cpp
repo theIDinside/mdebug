@@ -343,6 +343,23 @@ LocationList::Get() noexcept
   return std::span{ mLocationList };
 }
 
+u32
+Field::SizeBytes()
+{
+  // If it's not a bit field, return this field's type's "natural" size
+  if (mFieldOffset == 0 && mBitFieldSize == 0) {
+    return mType->SizeBytes();
+  }
+  // Return bitfield as a size in bytes
+  return std::max<u32>(mBitFieldSize / 8, 1);
+}
+
+BitField
+Field::GetBitField() const
+{
+  return BitField{ .mOffset = mFieldOffset, .mSize = mBitFieldSize };
+}
+
 Type::Type(DwarfTag debugInfoEntryTag,
   dw::IndexedDieReference debugInfoEntryReference,
   u32 sizeOf,

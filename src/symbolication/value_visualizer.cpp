@@ -217,15 +217,37 @@ PrimitiveSerializer::FormatEnum(Type &t, std::span<const u8> span, std::pmr::mem
   FormatAndReturn(result, "{}::(invalid){}", t.mName, value.u);
 }
 
+template <typename To>
+To
+BitCopyAndMaybeProcessBitField(std::span<const u8> from, const Value &value)
+{
+  static_assert(std::is_trivial_v<To>, "Target of bit copy must be trivially constructible.");
+
+  // Non-bitfield values is returned as-is.
+  const auto bitField = value.BitField();
+  return bitField
+    .transform([&](const BitField &field) {
+      u64 rawBits = 0;
+      std::memcpy(&rawBits, from.data(), std::min(sizeof(u64), from.size()));
+      return static_cast<To>(field.ExtractBits(rawBits));
+    })
+    .or_else([&]() -> std::optional<To> {
+      To result{};
+      std::memcpy(&result, from.data(), std::min(sizeof(To), from.size()));
+      return result;
+    })
+    .value();
+}
+
 // TODO(simon): add optimization where we can format our value directly to an outbuf?
 std::optional<std::pmr::string>
-PrimitiveSerializer::FormatValue(const Value &value, std::pmr::memory_resource *allocator) noexcept
+PrimitiveSerializer::FormatValue(const Value &valueObject, std::pmr::memory_resource *allocator) noexcept
 {
-  const auto span = value.MemoryView();
+  const auto span = valueObject.MemoryView();
   if (span.empty()) {
     return std::nullopt;
   }
-  auto *type = value.GetType();
+  auto *type = valueObject.GetType();
   const auto size_of = type->size_of;
 
   std::pmr::string result{ allocator };
@@ -248,11 +270,11 @@ PrimitiveSerializer::FormatValue(const Value &value, std::pmr::memory_resource *
 
   switch (type->GetBaseType().value()) {
   case BaseTypeEncoding::DW_ATE_address: {
-    std::uintptr_t value = BitCopy<std::uintptr_t>(span);
+    auto value = BitCopyAndMaybeProcessBitField<std::uintptr_t>(span, valueObject);
     FormatAndReturn(result, "0x{}", value);
   }
   case BaseTypeEncoding::DW_ATE_boolean: {
-    bool value = BitCopy<bool>(span);
+    bool value = BitCopyAndMaybeProcessBitField<bool>(span, valueObject);
     FormatAndReturn(result, "{}", value);
   }
   case BaseTypeEncoding::DW_ATE_float: {
@@ -270,19 +292,19 @@ PrimitiveSerializer::FormatValue(const Value &value, std::pmr::memory_resource *
   case BaseTypeEncoding::DW_ATE_signed:
     switch (size_of) {
     case 1: {
-      auto value = BitCopy<signed char>(span);
+      auto value = BitCopyAndMaybeProcessBitField<signed char>(span, valueObject);
       FormatAndReturn(result, "{}", value);
     }
     case 2: {
-      auto value = BitCopy<signed short>(span);
+      auto value = BitCopyAndMaybeProcessBitField<signed short>(span, valueObject);
       FormatAndReturn(result, "{}", value);
     }
     case 4: {
-      int value = BitCopy<int>(span);
+      int value = BitCopyAndMaybeProcessBitField<int>(span, valueObject);
       FormatAndReturn(result, "{}", value);
     }
     case 8: {
-      auto value = BitCopy<signed long long>(span);
+      auto value = BitCopyAndMaybeProcessBitField<signed long long>(span, valueObject);
       FormatAndReturn(result, "{}", value);
     }
     }
@@ -291,25 +313,25 @@ PrimitiveSerializer::FormatValue(const Value &value, std::pmr::memory_resource *
   case BaseTypeEncoding::DW_ATE_unsigned:
     switch (size_of) {
     case 1: {
-      u8 value = BitCopy<unsigned char>(span);
+      u8 value = BitCopyAndMaybeProcessBitField<unsigned char>(span, valueObject);
       FormatAndReturn(result, "{}", value);
     }
     case 2: {
-      u16 value = BitCopy<unsigned short>(span);
+      u16 value = BitCopyAndMaybeProcessBitField<unsigned short>(span, valueObject);
       FormatAndReturn(result, "{}", value);
     }
     case 4: {
-      u32 value = BitCopy<u32>(span);
+      u32 value = BitCopyAndMaybeProcessBitField<u32>(span, valueObject);
       FormatAndReturn(result, "{}", value);
     }
     case 8: {
-      u64 value = BitCopy<u64>(span);
+      u64 value = BitCopyAndMaybeProcessBitField<u64>(span, valueObject);
       FormatAndReturn(result, "{}", value);
     }
     }
     break;
   case BaseTypeEncoding::DW_ATE_UTF: {
-    u32 value = BitCopy<u32>(span);
+    u32 value = BitCopyAndMaybeProcessBitField<u32>(span, valueObject);
     FormatAndReturn(result, "{}", value);
   } break;
   case BaseTypeEncoding::DW_ATE_ASCII:

@@ -200,6 +200,26 @@ public:
   }
 };
 
+struct BitField
+{
+  u32 mOffset;
+  u16 mSize;
+
+  u64
+  Mask() const noexcept
+  {
+    return ((1ULL << mSize) - 1) << mOffset;
+  }
+
+  u64
+  ExtractBits(u64 quadWord) const noexcept
+  {
+    const u64 mask = Mask();
+    const u64 extractedBits = (quadWord & mask) >> mOffset;
+    return extractedBits;
+  }
+};
+
 // Fields are: member variables, member functions, etc
 struct Field
 {
@@ -208,6 +228,9 @@ struct Field
   Immutable<u32> mFieldOffset;
   Immutable<u16> mBitFieldSize;
   Immutable<std::string_view> mName;
+
+  u32 SizeBytes();
+  BitField GetBitField() const;
 };
 
 template <typename To, typename From>

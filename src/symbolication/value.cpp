@@ -69,6 +69,25 @@ Value::EnsureTypeResolved() const noexcept
   return type->SkipJunk()->ResolveAlias();
 }
 
+bool
+Value::ValueIsBitField() const noexcept
+{
+  if (kind != ValueKind::Field) {
+    return false;
+  }
+
+  return !(uField->mBitFieldSize == 0 && uField->mFieldOffset == 0);
+}
+
+std::optional<BitField>
+Value::BitField() const noexcept
+{
+  if (ValueIsBitField()) {
+    return uField->GetBitField();
+  }
+  return {};
+}
+
 Value::Value(VarContext context,
   std::string_view name,
   Symbol &kind,
@@ -560,7 +579,22 @@ Value::TakeMemoryReference() noexcept
 std::span<const u8>
 Value::MemoryView() const noexcept
 {
-  return mValueObject->View(mMemoryContentsOffsets, this->GetType()->Size());
+  u32 size = 0;
+  switch (kind) {
+  case ValueKind::Symbol:
+    size = uSymbol->mType->SizeBytes();
+    break;
+  case ValueKind::Field:
+    size = uField->SizeBytes();
+    break;
+  case ValueKind::AbsoluteAddress:
+    size = uType->SizeBytes();
+    break;
+  case ValueKind::Synthetic:
+    size = uSynthetic.mCount * uSynthetic.mLayoutType->SizeBytes();
+    break;
+  }
+  return mValueObject->View(mMemoryContentsOffsets, size);
 }
 
 std::span<const u8>
