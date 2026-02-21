@@ -1,7 +1,9 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "symbolication/dwarf_defs.h"
+
+// mdb
 #include <common.h>
+#include <symbolication/dwarf_defs.h>
 
 namespace mdb::sym::dw {
 
@@ -14,13 +16,12 @@ ReadInitialLength(const u8 *ptr, u64 &out, u8 &init_len_len) noexcept
     init_len_len = 4;
     out = peeked;
     return ptr;
-  } else {
-    ptr += 4;
-    out = *(u64 *)ptr;
-    ptr += 8;
-    init_len_len = 12;
-    return ptr;
   }
+  ptr += 4;
+  out = *(u64 *)ptr;
+  ptr += 8;
+  init_len_len = 12;
+  return ptr;
 }
 
 constexpr const u8 *

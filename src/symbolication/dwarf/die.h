@@ -140,7 +140,7 @@ public:
   bool HasLoadedDies() const noexcept;
   const std::vector<DieMetaData> &GetDies() noexcept;
   void ClearLoadedCache() noexcept;
-  const AbbreviationInfo &GetAbbreviation(u32 abbreviation_code) const noexcept;
+  const AbbreviationInfo &GetAbbreviation(u32 abbreviationCode) const noexcept;
   ObjectFile *GetObjectFile() const noexcept;
   const UnitHeader &GetHeader() const noexcept;
   /// The offset from the beginning of the ELF section called .debug_info to this compilation unit.
@@ -201,23 +201,23 @@ class UnitHeadersRead
   void Accumulate(u64 unitSize) noexcept;
   u64 AverageUnitSize() noexcept;
   void AddUnitHeader(SymbolInfoId id,
-    u64 sec_offset,
-    u64 unit_size,
-    std::span<const u8> die_data,
-    u64 abbrev_offset,
-    u8 addr_size,
+    u64 sectionOffset,
+    u64 unitSize,
+    std::span<const u8> dieData,
+    u64 abbreviationOffset,
+    u8 addrSize,
     u8 format,
     DwarfVersion version,
-    DwarfUnitType unit_type) noexcept;
+    DwarfUnitType unitType) noexcept;
   void AddTypeUnitHeader(SymbolInfoId id,
-    u64 sec_offset,
-    u64 unit_size,
-    std::span<const u8> die_data,
-    u64 abbrev_offset,
-    u8 addr_size,
+    u64 sectionOffset,
+    u64 unitSize,
+    std::span<const u8> dieData,
+    u64 abbreviationOffset,
+    u8 addrSize,
     u8 format,
-    u64 type_signature,
-    u64 type_offset) noexcept;
+    u64 typeSignature,
+    u64 typeOffset) noexcept;
 
 public:
   void ReadUnitHeaders(ObjectFile *obj) noexcept;

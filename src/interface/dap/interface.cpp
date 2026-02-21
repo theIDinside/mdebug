@@ -44,7 +44,7 @@ AtExit() noexcept
 std::string_view
 ContentDescriptor::payload() const noexcept
 {
-  return std::string_view{ payload_begin, payload_begin + payload_length };
+  return std::string_view{ mPayloadBegin, mPayloadBegin + mPayloadLength };
 }
 /*
 // Ordered by size, not alphabetically
@@ -97,13 +97,13 @@ static constexpr std::string_view strings[]{
 */
 
 DapEventSystem::DapEventSystem(DebugAdapterManager *client) noexcept
-    : mClient(client), mWriteFileDescriptor(client->WriteFileDescriptor()), mUIResultLock{}, mEventsQueue{}
+    : mClient(client), mWriteFileDescriptor(client->WriteFileDescriptor())
 {
   auto [r, w] = mdb::Notifier::notify_pipe();
   mNewClientNotifier = mdb::Notifier::notify_pipe();
   mPostedEventNotified = w;
   mPostedEventListener = r;
-  mTraceeStandardOutBuffer = mmap_buffer<char>(4096 * 3);
+  mTraceeStandardOutBuffer = mmap_buffer<char>(4096UL * 3);
   mTemporaryArena = alloc::ArenaResource::CreateUniquePtr(alloc::Page{ 16 });
 }
 
@@ -120,7 +120,7 @@ DapEventSystem::PopEvent() noexcept
 }
 
 void
-DapEventSystem::WriteProtocolMessage(std::string_view msg) noexcept
+DapEventSystem::WriteProtocolMessage(std::string_view msg) const noexcept
 {
   const auto header = std::format("Content-Length: {}\r\n\r\n", msg.size());
   CDLOG(MDB_DEBUG == 1, dap, "WRITING -->{}{}<---", header, msg);
@@ -173,7 +173,7 @@ DapEventSystem::WaitForEvents(PollState &state, std::vector<DapNotification> &ev
     state.AddStandardIOSource(io.mFd, io.mSessionId);
   }
 
-  if (poll(state.fds.data(), state.fds.size(), -1) <= 0) {
+  if (poll(state.mFds.data(), state.mFds.size(), -1) <= 0) {
     return false;
   }
 
@@ -197,7 +197,7 @@ DapEventSystem::Poll(PollState &state) noexcept
       case InterfaceNotificationSource::ClientStdout: {
         auto tty = mClient->GetTtyFileDescriptor();
         MDB_ASSERT(tty.has_value(), "DAP Client has invalid configuration");
-        const auto bytes_read = read(*tty, mTraceeStandardOutBuffer, 4096 * 3);
+        const auto bytes_read = read(*tty, mTraceeStandardOutBuffer, 4096UL * 3);
         if (bytes_read == -1) {
           continue;
         }
@@ -217,11 +217,11 @@ void
 DebugAdapterManager::ReadPendingCommands() noexcept
 {
   MDB_ASSERT(mReadFd != -1, "file descriptor for reading commands invalid: {}", mReadFd);
-  if (!mParseSwapBuffer.expect_read_from_fd(mReadFd)) {
+  if (!mParseSwapBuffer.ExpectReadFromFd(mReadFd)) {
     return;
   }
   bool no_partials = false;
-  const auto request_headers = ParseHeadersFromBuffer(mParseSwapBuffer.take_view(), &no_partials);
+  const auto requestHeaders = ParseHeadersFromBuffer(mParseSwapBuffer.TakeView(), &no_partials);
 
   const auto PushNewCommand = [&](const ContentParse &parse) {
     const auto *cd = std::get_if<ContentDescriptor>(&parse);
@@ -229,25 +229,25 @@ DebugAdapterManager::ReadPendingCommands() noexcept
     EventSystem::Get().PushCommand(this, std::move(cmd));
   };
 
-  if (no_partials && request_headers.size() > 0) {
-    for (auto &&hdr : request_headers) {
+  if (no_partials && requestHeaders.size() > 0) {
+    for (auto &&hdr : requestHeaders) {
       PushNewCommand(hdr);
     }
     // since there's no partials left in the buffer, we reset it
-    mParseSwapBuffer.clear();
+    mParseSwapBuffer.Clear();
   } else {
-    if (request_headers.size() > 1) {
-      for (auto i = 0ull; i < request_headers.size() - 1; i++) {
-        PushNewCommand(request_headers[i]);
+    if (requestHeaders.size() > 1) {
+      for (size_t i = 0; i < requestHeaders.size() - 1; i++) {
+        PushNewCommand(requestHeaders[i]);
       }
 
-      auto rd = std::get_if<RemainderData>(&request_headers.back());
+      const RemainderData *rd = std::get_if<RemainderData>(&requestHeaders.back());
       MDB_ASSERT(rd, "Parsed communication was not of type RemainderData");
-      mParseSwapBuffer.swap(rd->offset);
-      MDB_ASSERT(mParseSwapBuffer.current_size() == rd->length,
+      mParseSwapBuffer.Swap(rd->mOffset);
+      MDB_ASSERT(mParseSwapBuffer.CurrentSize() == rd->mLength,
         "Parse Swap Buffer operation failed; expected length {} but got {}",
-        rd->length,
-        mParseSwapBuffer.current_size());
+        rd->mLength,
+        mParseSwapBuffer.CurrentSize());
     }
   }
 }
@@ -271,8 +271,8 @@ DebugAdapterManager::SetTtyOut(int fd, SessionId pid) noexcept
 {
   MDB_ASSERT(mTtyFileDescriptor == -1, "TTY fd was already set!");
   mTtyFileDescriptor = fd;
-  auto dap = Tracer::Get().GetDap();
-  dap->ConfigureTty(fd);
+  DapEventSystem *dap = Tracer::Get().GetDap();
+  DapEventSystem::ConfigureTty(fd);
   dap->AddStandardIOSource(fd, pid);
 }
 
@@ -288,7 +288,7 @@ DebugAdapterManager::GetTtyFileDescriptor() const noexcept
 tc::SupervisorState *
 DebugAdapterManager::GetSupervisor(Pid pid) const noexcept
 {
-  for (auto sv : mSupervisors) {
+  for (tc::SupervisorState *sv : mSupervisors) {
     if (sv->TaskLeaderTid() == pid) {
       return sv;
     }
@@ -325,7 +325,7 @@ DebugAdapterManager::SetDebugAdapterSessionType(DapClientSession type) noexcept
 }
 
 bool
-DebugAdapterManager::IsClosed() noexcept
+DebugAdapterManager::IsClosed() const noexcept
 {
   return mReadFd == -1;
 }
@@ -373,9 +373,9 @@ DebugAdapterManager::FlushEvents() noexcept
   auto scope = mEventsAllocator->ScopeAllocation();
 
   std::pmr::vector<UIResultPtr> tmp{ scope.GetAllocator() };
-  constexpr auto maxToFlush = 64ul;
+  constexpr ssize_t maxToFlush = 64;
   tmp.reserve(maxToFlush);
-  const auto count = std::min(mDelayedEvents.size(), maxToFlush);
+  const auto count = std::min<ssize_t>(static_cast<ssize_t>(mDelayedEvents.size()), maxToFlush);
   {
     std::lock_guard lock(m);
     std::copy(mDelayedEvents.begin(), mDelayedEvents.begin() + count, std::back_inserter(tmp));
@@ -386,7 +386,7 @@ DebugAdapterManager::FlushEvents() noexcept
     }
   }
 
-  for (auto evt : tmp) {
+  for (const UIResult *evt : tmp) {
     auto result = evt->Serialize(0, scope.GetAllocator());
     WriteSerializedProtocolMessage(result);
     delete evt;
@@ -396,9 +396,9 @@ DebugAdapterManager::FlushEvents() noexcept
 void
 DapEventSystem::FlushEvents() noexcept
 {
-  auto tempAlloc = mTemporaryArena.get();
+  alloc::ArenaResource *tempAlloc = mTemporaryArena.get();
   while (!mEventsQueue.empty()) {
-    auto evt = PopEvent();
+    UIResultPtr evt = PopEvent();
     const auto protocol_msg = evt->Serialize(0, tempAlloc);
     WriteProtocolMessage(protocol_msg);
     delete evt;
@@ -418,16 +418,17 @@ DapEventSystem::Get() const noexcept
   return mClient;
 }
 
+/* static */
 void
-DapEventSystem::ConfigureTty(int master_pty_fd) noexcept
+DapEventSystem::ConfigureTty(int masterPtyFd) noexcept
 {
   // todo(simon): when we add a new pty, what we need to do
   // is somehow find a way to re-route (temporarily) the other pty's to /dev/null, because we don't care for them
   // however, we must also be able to _restore_ those pty's from that re-routing. I'm not sure that works, or if
   // it's possible but it would be nice.
-  auto flags = fcntl(master_pty_fd, F_GETFL);
+  auto flags = fcntl(masterPtyFd, F_GETFL);
   VERIFY(flags != -1, "Failed to get pty flags");
-  VERIFY(fcntl(master_pty_fd, F_SETFL, flags | FNDELAY | FNONBLOCK) != -1, "Failed to set FNDELAY on pty");
+  VERIFY(fcntl(masterPtyFd, F_SETFL, flags | FNDELAY | FNONBLOCK) != -1, "Failed to set FNDELAY on pty");
 }
 
 void
@@ -444,7 +445,7 @@ SupervisorSessionConfiguration::Complete()
 /*static*/ std::unique_ptr<SupervisorSessionConfiguration>
 SupervisorSessionConfiguration::Create()
 {
-  return std::unique_ptr<SupervisorSessionConfiguration>{ new SupervisorSessionConfiguration{} };
+  return std::make_unique<SupervisorSessionConfiguration>();
 }
 
 ConfigureState
@@ -611,7 +612,7 @@ std::unique_ptr<alloc::ScopedArenaAllocator>
 DebugAdapterManager::AcquireArena() noexcept
 {
   MDB_ASSERT(!mCommandAllocatorPool.empty(), "No more allocators to take from the pool");
-  auto alloc = mCommandAllocatorPool.back();
+  alloc::ArenaResource *alloc = mCommandAllocatorPool.back();
   mCommandAllocatorPool.pop_back();
   return std::make_unique<alloc::ScopedArenaAllocator>(alloc, &mCommandAllocatorPool);
 }
@@ -624,7 +625,7 @@ DebugAdapterManager::PostDapEvent(ui::UIResultPtr event)
   // 100% in the idea to keep it this way, we shouldn't really have to `new` and `delete` UIResultPtr's, that
   // should just be on the stack; but I'm keeping it here for now, in case I want to try out the other way.
 
-  auto allocator = mEventsAllocator.get()->ScopeAllocation();
+  auto allocator = mEventsAllocator->ScopeAllocation();
   auto result = event->Serialize(0, allocator);
   WriteSerializedProtocolMessage(result);
   delete event;
@@ -641,38 +642,84 @@ DebugAdapterManager::WriteFileDescriptor() const noexcept
   return mWriteFd;
 }
 
-static constexpr u32 ContentLengthHeaderLength = "Content-Length: "sv.size();
+static constexpr auto sHeaderPrefix = "Content-Length: "sv;
+static constexpr auto sHeaderSuffix = "\r\n\r\n"sv;
+static constexpr u32 sContentLengthHeaderLength = sHeaderPrefix.size();
+
+class MessageHeader
+{
+  static constexpr std::array<char, 128>
+  CreateMessageHeader()
+  {
+    std::array<char, 128> header;
+    std::ranges::copy(sHeaderPrefix, header.begin());
+    return header;
+  }
+
+  std::array<char, 128> mContents = CreateMessageHeader();
+  size_t mHeaderLength = 0;
+
+  constexpr auto
+  Start()
+  {
+    return std::next(mContents.begin(), sContentLengthHeaderLength);
+  }
+
+public:
+  [[nodiscard]] constexpr std::string_view
+  StringView() const noexcept
+  {
+    return std::string_view{ mContents.data(), mHeaderLength };
+  }
+
+  [[nodiscard]] size_t
+  Length() const noexcept
+  {
+    return mHeaderLength;
+  }
+
+  bool
+  SetLength(size_t length)
+  {
+    const auto res = std::to_chars(Start(), mContents.end(), length, 10);
+    if (res.ec == std::errc()) {
+      std::memcpy(res.ptr, sHeaderSuffix.data(), sHeaderSuffix.size());
+      mHeaderLength = std::distance(mContents.begin(), res.ptr) + sHeaderSuffix.size();
+      return true;
+    }
+    return false;
+  }
+
+  iovec
+  ToParam()
+  {
+    return iovec{ .iov_base = mContents.data(), .iov_len = mHeaderLength };
+  }
+};
 
 bool
 DebugAdapterManager::WriteSerializedProtocolMessage(std::string_view output) const noexcept
 {
   MDB_ASSERT(!output.empty(), "Ouptut is empty!");
-  char header_buffer[128]{ "Content-Length: " };
-  static constexpr auto header_end = "\r\n\r\n"sv;
 
-  auto begin = header_buffer + ContentLengthHeaderLength;
-  auto res = std::to_chars(begin, header_buffer + 128, output.size(), 10);
-  MDB_ASSERT(res.ec == std::errc(), "Failed to append message size to content header");
-  std::memcpy(res.ptr, header_end.data(), header_end.size());
-  const auto header_length = static_cast<int>(res.ptr + header_end.size() - header_buffer);
+  MessageHeader header;
+  VERIFY(header.SetLength(output.size()), "Failed to set header!");
 
-  struct iovec iov[2];
-  iov[0].iov_base = header_buffer;
-  iov[0].iov_len = header_length;
+  std::array<iovec, 2> iov;
+  iov[0] = header.ToParam();
 
   iov[1].iov_base = (void *)output.data();
   iov[1].iov_len = output.size();
 
-  const auto header = std::format("Content-Length: {}\r\n\r\n", output.size());
 #ifdef DEBUG
-  DBGLOG(dap, "[write]:[{}{}]", header, output);
+  DBGLOG(dap, "[write]:[{}{}]", header.StringView(), output);
 #endif
 
-  const auto result = ::writev(mWriteFd, iov, 2);
-  VERIFY(result == (header_length + static_cast<ssize_t>(output.size())),
+  const auto result = ::writev(mWriteFd, iov.data(), 2);
+  VERIFY(result == (header.Length() + static_cast<ssize_t>(output.size())),
     "Required flush-write but wrote partial content: {} out of {}",
     result,
-    header_length + output.size());
+    header.Length() + output.size());
   VERIFY(result != -1, "Expected succesful write to fd={}. msg='{}'", mWriteFd, output);
   return result >= static_cast<ssize_t>(output.size());
 }

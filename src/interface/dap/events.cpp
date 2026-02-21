@@ -11,7 +11,7 @@ namespace mdb::ui::dap {
   return result
 // std::pmr::string Serialize(int monotonic_id, std::pmr::memory_resource* allocator=nullptr) const noexcept final;
 std::pmr::string
-InitializedEvent::Serialize(int, std::pmr::memory_resource *arenaAllocator) const noexcept
+InitializedEvent::Serialize([[maybe_unused]] int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
   // In cases where we attach to an existing process, the client (vscode+extension) can get the sessionId <=>
   // process id mapping immediately For Launch requests however, we can't create this mapping until the process is
@@ -23,13 +23,12 @@ InitializedEvent::Serialize(int, std::pmr::memory_resource *arenaAllocator) cons
       1,
       mProcessId,
       *mDeterminedProcessId);
-  } else {
-    // Process ID not yet determined; will have to be determined post launch
-    ReturnFormatted(
-      R"({{"seq":{},"processId":{},"type":"event","event":"initialized", "body":{{"processId":null}}}})",
-      1,
-      mProcessId);
   }
+  // Process ID not yet determined; will have to be determined post launch
+  ReturnFormatted(
+    R"({{"seq":{},"processId":{},"type":"event","event":"initialized", "body":{{"processId":null}}}})",
+    1,
+    mProcessId);
 }
 
 std::pmr::string
@@ -53,19 +52,19 @@ ModuleEvent::ModuleEvent(SessionId sessionId,
 {
 }
 
-ModuleEvent::ModuleEvent(SessionId sessionId, std::string_view reason, const ObjectFile &object_file) noexcept
-    : UIResult(sessionId), mObjectFileId(object_file.GetObjectFileId()), mReason(reason),
-      mName(object_file.GetFilePath().filename()), mPath(object_file.GetFilePath()),
-      mAddressRange(object_file.GetAddressRange()), mSharedObjectFiles(SharedObjectSymbols::None),
-      mSymbolObjectFilePath(object_file.GetFilePath()), version()
+ModuleEvent::ModuleEvent(SessionId sessionId, std::string_view reason, const ObjectFile &objectFile) noexcept
+    : UIResult(sessionId), mObjectFileId(objectFile.GetObjectFileId()), mReason(reason),
+      mName(objectFile.GetFilePath().filename()), mPath(objectFile.GetFilePath()),
+      mAddressRange(objectFile.GetAddressRange()), mSharedObjectFiles(SharedObjectSymbols::None),
+      mSymbolObjectFilePath(objectFile.GetFilePath())
 {
 }
 
-ModuleEvent::ModuleEvent(SessionId sessionId, std::string_view reason, const SymbolFile &symbol_file) noexcept
-    : UIResult(sessionId), mObjectFileId(symbol_file.mSymbolObjectFileId), mReason(reason),
-      mName(symbol_file.GetObjectFilePath().filename()), mPath(symbol_file.GetObjectFilePath()),
-      mAddressRange(symbol_file.mPcBounds), mSharedObjectFiles(SharedObjectSymbols::Full),
-      mSymbolObjectFilePath(symbol_file.GetObjectFilePath().c_str()), version()
+ModuleEvent::ModuleEvent(SessionId sessionId, std::string_view reason, const SymbolFile &symbolFile) noexcept
+    : UIResult(sessionId), mObjectFileId(symbolFile.mSymbolObjectFileId), mReason(reason),
+      mName(symbolFile.GetObjectFilePath().filename()), mPath(symbolFile.GetObjectFilePath()),
+      mAddressRange(symbolFile.mPcBounds), mSharedObjectFiles(SharedObjectSymbols::Full),
+      mSymbolObjectFilePath(symbolFile.GetObjectFilePath().c_str())
 {
 }
 
@@ -75,9 +74,8 @@ format_optional(const std::optional<T> &opt, bool with_quotes) noexcept -> std::
 {
   if (with_quotes) {
     return opt.transform([](auto &value) { return std::format(R"("{}")", value); }).value_or("null");
-  } else {
-    return opt.transform([](auto &value) { return std::format(R"({})", value); }).value_or("null");
   }
+  return opt.transform([](auto &value) { return std::format(R"({})", value); }).value_or("null");
 }
 
 std::pmr::string
@@ -108,8 +106,8 @@ ModuleEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const
   return result;
 }
 
-ContinuedEvent::ContinuedEvent(SessionId sessionId, Tid tid, bool allThreads) noexcept
-    : UIResult{ sessionId }, mThreadId(tid), mAllThreadsContinued(allThreads)
+ContinuedEvent::ContinuedEvent(SessionId pid, Tid tid, bool allThreads) noexcept
+    : UIResult{ pid }, mThreadId(tid), mAllThreadsContinued(allThreads)
 {
 }
 
@@ -150,9 +148,7 @@ Process::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noe
     mNewProcessId);
 }
 
-ExitedEvent::ExitedEvent(SessionId sessionId, int exitCode) noexcept : UIResult{ sessionId }, mExitCode(exitCode)
-{
-}
+ExitedEvent::ExitedEvent(SessionId pid, int exitCode) noexcept : UIResult{ pid }, mExitCode(exitCode) {}
 
 std::pmr::string
 ExitedEvent::Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
@@ -188,11 +184,11 @@ StoppedEvent::StoppedEvent(SessionId sessionId,
   StoppedReason reason,
   std::string_view description,
   Tid tid,
-  std::vector<int> breakpointIds,
+  std::vector<int> bps,
   std::string_view text,
   bool allStopped) noexcept
-    : UIResult{ sessionId }, mReason(reason), mDescription(description), mTid(tid),
-      mBreakpointIds(std::move(breakpointIds)), mText(text), mAllThreadsStopped(allStopped)
+    : UIResult{ sessionId }, mReason(reason), mDescription(description), mTid(tid), mBreakpointIds(std::move(bps)),
+      mText(text), mAllThreadsStopped(allStopped)
 {
 }
 
@@ -252,9 +248,8 @@ zip(Fn &&fn, Optionals... opts) noexcept
 {
   if ((opts && ...)) {
     return fn(opts.value()...);
-  } else {
-    return std::optional<T>{};
   }
+  return std::optional<T>{};
 }
 
 std::pmr::string

@@ -137,30 +137,6 @@ template <std::size_t N> struct StringLiteral
   }
 };
 
-template <> struct StringLiteral<0>
-{
-
-  consteval StringLiteral([[maybe_unused]] const char (&str)[0]) noexcept {}
-
-  consteval const char *
-  CString() const
-  {
-    return nullptr;
-  }
-
-  consteval std::string_view
-  StringView() const
-  {
-    return std::string_view{};
-  }
-
-  static constexpr auto
-  Size() noexcept
-  {
-    return size_t{ 0 };
-  }
-};
-
 template <typename... Args> struct ReturnType;
 
 // Specialization for non-empty packs
@@ -177,11 +153,11 @@ template <typename ReturnType, typename... Args> struct ToFunction<std::tuple<Re
   using FunctionType = std::function<ReturnType(Args...)>;
   using Return = ReturnType;
   using FnArgs = std::tuple<Args...>;
-  static constexpr inline auto ArgSize = std::tuple_size_v<FnArgs>;
+  static constexpr auto ArgSize = std::tuple_size_v<FnArgs>;
 };
 
-#define KiloBytes(KB) 1024 * KB
-#define MegaBytes(MB) 1024 * 1024 * MB
+#define KiloBytes(KB) (1024U * (KB))
+#define MegaBytes(MB) (1024U * 1024U * (MB))
 
 template <typename T>
 consteval auto

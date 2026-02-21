@@ -6,49 +6,49 @@ namespace mdb::ui::dap {
 static const std::regex CONTENT_LENGTH_HEADER = std::regex{ R"(Content-Length: (\d+)\r\n\r\n)" };
 
 std::vector<ContentParse>
-ParseHeadersFromBuffer(const std::string_view buffer_view, bool *all_msgs_ok) noexcept
+ParseHeadersFromBuffer(std::string_view bufferView, bool *allMessagesOk) noexcept
 {
   std::vector<ContentParse> result;
 
   std::smatch m;
-  std::string_view internal_view{ buffer_view };
+  std::string_view internalView{ bufferView };
   ViewMatchResult base_match;
   bool partial_found = false;
-  while (std::regex_search(internal_view.begin(), internal_view.end(), base_match, CONTENT_LENGTH_HEADER)) {
+  while (std::regex_search(internalView.begin(), internalView.end(), base_match, CONTENT_LENGTH_HEADER)) {
     if (base_match.size() == 2) {
       std::sub_match<std::string_view::const_iterator> base_sub_match = base_match[1];
       std::string_view len_str{ base_sub_match.first, base_sub_match.second };
       const auto res = to_integral<u64>(len_str);
       MDB_ASSERT(res.has_value(), "Failed to parse length from Content-Length header");
       const auto len = res.value();
-      if (base_match.position() + base_match.length() + len <= internal_view.size()) {
-        const auto header_begin_ptr = internal_view.data() + base_match.position();
-        const auto payload_begin_ptr = header_begin_ptr + base_match.length();
-        const auto packet_offset =
-          static_cast<u64>(std::distance((const char *)buffer_view.data(), (const char *)header_begin_ptr));
-        result.push_back(ContentDescriptor{ .payload_length = len,
-          .packet_offset = packet_offset,
-          .header_begin = header_begin_ptr,
-          .payload_begin = payload_begin_ptr });
-        internal_view.remove_prefix(base_match.position() + base_match.length() + len);
+      if (base_match.position() + base_match.length() + len <= internalView.size()) {
+        const auto *headerBeginPtr = internalView.data() + base_match.position();
+        const auto *payloadBeginPtr = headerBeginPtr + base_match.length();
+        const u64 packet_offset =
+          static_cast<u64>(std::distance((const char *)bufferView.data(), (const char *)headerBeginPtr));
+        result.emplace_back(ContentDescriptor{ .mPayloadLength = len,
+          .mPacketOffset = packet_offset,
+          .mHeaderBegin = headerBeginPtr,
+          .mPayloadBegin = payloadBeginPtr });
+        internalView.remove_prefix(base_match.position() + base_match.length() + len);
       } else {
-        result.push_back(PartialContentDescriptor{ .payload_length = len,
-          .payload_missing = (base_match.position() + base_match.length() + len) - internal_view.size(),
-          .payload_begin = internal_view.data() + base_match.position() + base_match.length() });
-        internal_view.remove_prefix(internal_view.size());
+        result.emplace_back(PartialContentDescriptor{ .mPayloadLength = len,
+          .mPayloadMissing = (base_match.position() + base_match.length() + len) - internalView.size(),
+          .mPayloadBegin = internalView.data() + base_match.position() + base_match.length() });
+        internalView.remove_prefix(internalView.size());
         partial_found = true;
       }
     }
   }
-  if (!internal_view.empty()) {
-    const char *ptr = internal_view.data();
-    const char *begin = buffer_view.data();
+  if (!internalView.empty()) {
+    const char *ptr = internalView.data();
+    const char *begin = bufferView.data();
     const u64 offset = std::distance(begin, ptr);
-    result.push_back(RemainderData{ .length = internal_view.size(), .offset = offset });
+    result.emplace_back(RemainderData{ .mLength = internalView.size(), .mOffset = offset });
     partial_found = true;
   }
-  if (all_msgs_ok != nullptr) {
-    *all_msgs_ok = !partial_found;
+  if (allMessagesOk != nullptr) {
+    *allMessagesOk = !partial_found;
   }
   return result;
 }

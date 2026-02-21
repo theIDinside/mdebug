@@ -89,8 +89,9 @@ public:
 
 class PrimitiveSerializer final : public DebugAdapterSerializer
 {
-  std::optional<std::pmr::string> FormatValue(const Value &value, std::pmr::memory_resource *allocator) noexcept;
-  std::optional<std::pmr::string> FormatEnum(
+  static std::optional<std::pmr::string> FormatValue(
+    const Value &value, std::pmr::memory_resource *allocator) noexcept;
+  static std::optional<std::pmr::string> FormatEnum(
     Type &t, std::span<const u8> span, std::pmr::memory_resource *allocator) noexcept;
 
 public:

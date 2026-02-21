@@ -478,13 +478,13 @@ UnitReader::GetObjectFile() const noexcept
 }
 
 AttributeValue
-ReadAttributeValue(UnitReader &reader, Abbreviation abbr, const std::vector<i64> &implicit_consts) noexcept
+ReadAttributeValue(UnitReader &reader, Abbreviation abbr, const std::vector<i64> &implicitConsts) noexcept
 {
   static constexpr auto IS_DWZ = false;
   MDB_ASSERT(IS_DWZ == false, ".dwo files not supported yet");
   if (abbr.IMPLICIT_CONST_INDEX != UINT8_MAX) {
     return AttributeValue{
-      implicit_consts[abbr.IMPLICIT_CONST_INDEX], AttributeForm::DW_FORM_implicit_const, abbr.mName
+      implicitConsts[abbr.IMPLICIT_CONST_INDEX], AttributeForm::DW_FORM_implicit_const, abbr.mName
     };
   }
 
@@ -575,7 +575,7 @@ ReadAttributeValue(UnitReader &reader, Abbreviation abbr, const std::vector<i64>
       // new_abbr.IMPLICIT_CONST_INDEX = implicit_consts.size();
       // implicit_consts.push_back(value);
     }
-    return ReadAttributeValue(reader, newAbbr, implicit_consts);
+    return ReadAttributeValue(reader, newAbbr, implicitConsts);
   }
   case AttributeForm::DW_FORM_sec_offset: {
     const auto offset = reader.ReadOffsetValue();
@@ -635,7 +635,7 @@ ReadAttributeValue(UnitReader &reader, Abbreviation abbr, const std::vector<i64>
   }
   case AttributeForm::DW_FORM_implicit_const:
     MDB_ASSERT(abbr.IMPLICIT_CONST_INDEX != UINT8_MAX, "Invalid implicit const index");
-    return AttributeValue{ implicit_consts[abbr.IMPLICIT_CONST_INDEX], abbr.mForm, abbr.mName };
+    return AttributeValue{ implicitConsts[abbr.IMPLICIT_CONST_INDEX], abbr.mForm, abbr.mName };
   case AttributeForm::DW_FORM_loclistx: {
     MDB_ASSERT(elf->mDebugLoclist != nullptr,
       ".debug_rnglists not read in or found in objfile {}",

@@ -9,16 +9,13 @@
 #include <charconv>
 #include <concepts>
 #include <filesystem>
-#include <numeric>
 #include <optional>
 #include <source_location>
+#include <type_traits>
 
 // system
-
 #include <sys/mman.h>
 #include <sys/user.h>
-#include <type_traits>
-#include <vector>
 
 // dependecy
 
@@ -62,11 +59,11 @@ enum class DwFormat : std::uint8_t
   DW64
 };
 
-#define MDB_PAGE_SIZE 4096
+#define MDB_PAGE_SIZE 4096UL
 
 template <typename T> using Option = std::optional<T>;
 
-enum class TargetSession
+enum class TargetSession : u8
 {
   Launched,
   Attached
@@ -78,8 +75,8 @@ template <typename T> using ActualType = std::remove_cvref_t<T>;
 template <class... T> constexpr bool always_false = false;
 
 [[noreturn]] void panic(
-  std::string_view err_msg, const char *functionName, const char *file, int line, int strip_levels = 0);
-[[noreturn]] void panic(std::string_view err_msg, const std::source_location &loc_msg, int strip_levels = 0);
+  std::string_view err_msg, const char *functionName, const char *file, size_t line, size_t strip_levels = 0);
+[[noreturn]] void panic(std::string_view err_msg, const std::source_location &loc_msg, size_t strip_levels = 0);
 
 /**
  * Get name for `syscall_number`

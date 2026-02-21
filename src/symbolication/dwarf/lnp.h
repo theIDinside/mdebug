@@ -31,7 +31,7 @@ struct DirEntry
 };
 
 constexpr u64
-lnp_index(u64 index, DwarfVersion version) noexcept
+LineNumberProgramIndex(u64 index, DwarfVersion version) noexcept
 {
   switch (version) {
   case DwarfVersion::D2:

@@ -123,18 +123,18 @@ public:
   SymbolFile *GetSymbolFile() const noexcept;
   TaskInfo *Task() const noexcept;
 
-  sym::FunctionSymbol &FullSymbolInfo() noexcept;
+  sym::FunctionSymbol &FullSymbolInfo() const noexcept;
 
   sym::FunctionSymbol *MaybeGetFullSymbolInfo() const noexcept;
   const MinSymbol *MaybeGetMinimalSymbol() const noexcept;
 
-  IterateFrameSymbols BlockSymbolIterator(FrameVariableKind variable_set) noexcept;
+  IterateFrameSymbols BlockSymbolIterator(FrameVariableKind variablesKind) noexcept;
 
   u32 GetInitializedVariables(
     FrameVariableKind variableSet, std::vector<NonNullPtr<const sym::Symbol>> &outVector) noexcept;
 
-  u32 FrameLocalVariablesCount() noexcept;
-  u32 FrameParameterCounts() noexcept;
+  u32 FrameLocalVariablesCount() const noexcept;
+  u32 FrameParameterCounts() const noexcept;
 
   friend constexpr bool
   operator==(const Frame &l, const Frame &r) noexcept

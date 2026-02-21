@@ -7,8 +7,8 @@
 
 namespace mdb::ui::dap {
 InvalidArgsResponse::InvalidArgsResponse(
-  Pid processId, std::string_view command, MissingOrInvalidArgs &&missing_args, InvalidArgs *cmd) noexcept
-    : UIResult(false, cmd), mProcessId(processId), mCommand(command), mMissingOrInvalid(std::move(missing_args))
+  Pid processId, std::string_view command, MissingOrInvalidArgs &&missingArgs, InvalidArgs *cmd) noexcept
+    : UIResult(false, cmd), mProcessId(processId), mCommand(command), mMissingOrInvalid(std::move(missingArgs))
 {
 }
 
@@ -57,7 +57,7 @@ InvalidArgsResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocato
     }
     wrote = false;
     formatIter = std::format_to(formatIter, R"("errors": {{)");
-    for (auto ref : parsedAndInvalid) {
+    for (const auto *ref : parsedAndInvalid) {
       if (wrote) {
         *formatIter++ = ',';
       }

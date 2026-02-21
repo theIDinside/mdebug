@@ -60,6 +60,7 @@ InitializationConfiguration::ConfigureWithParser(CommandLineRegistry &parser) no
       std::string lowered;
       lowered.reserve(arg.size());
       for (const auto c : arg) {
+        // NOLINTNEXTLINE
         lowered.push_back(std::tolower(c));
       }
 
@@ -71,7 +72,7 @@ InitializationConfiguration::ConfigureWithParser(CommandLineRegistry &parser) no
 
       Transport defaultTransport = Transport::UnixSocket;
 
-      if (kind != arg.npos) {
+      if (kind != std::string_view::npos) {
         auto transport = arg.substr(0, kind);
         arg.remove_prefix(kind + 1);
         // MAYBE TODO: Future may support tcp:, ... etc
@@ -84,12 +85,10 @@ InitializationConfiguration::ConfigureWithParser(CommandLineRegistry &parser) no
         // /tmp is return by this fn.
         fs::path AllowedRoot = fs::temp_directory_path();
         // for each in (a, b) in zipped: (break condition: a or b hit its .end())
-        for (const auto &[root, branch] : std::views::zip(AllowedRoot, subDirOftmp)) {
-          if (root != branch) {
-            return false;
-          }
-        }
-        return true;
+        return std::ranges::all_of(std::views::zip(AllowedRoot, subDirOftmp), [](const auto &zipped) {
+          const auto &[root, branch] = zipped;
+          return root == branch;
+        });
       };
 
       switch (defaultTransport) {

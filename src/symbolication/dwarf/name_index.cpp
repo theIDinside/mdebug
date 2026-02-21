@@ -1,10 +1,12 @@
 /** LICENSE TEMPLATE */
 #include "name_index.h"
-#include "die.h"
-#include "symbolication/dwarf/debug_info_reader.h"
-#include "utils/logger.h"
-#include "utils/thread_pool.h"
+
+// mdb
+#include <symbolication/dwarf/debug_info_reader.h>
+#include <symbolication/dwarf/die.h>
 #include <symbolication/objfile.h>
+#include <utils/logger.h>
+#include <utils/thread_pool.h>
 
 namespace mdb::sym::dw {
 

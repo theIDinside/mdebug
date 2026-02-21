@@ -387,7 +387,7 @@ struct Continue final : public ui::UICommand
       target->ResumeTarget(tc::RunType::Continue);
       success = true;
     } else {
-      auto task = target->GetTaskByTid(mThreadId);
+      TaskInfo *task = target->GetTaskByTid(mThreadId);
       if (task && task->CanContinue()) {
         target->ResumeTask(*task, tc::RunType::Continue);
         success = true;
@@ -449,7 +449,7 @@ struct Next final : public ui::UICommand
   {
     auto *target = GetSupervisoOrSendError();
 
-    auto task = target->GetTaskByTid(mThreadId);
+    TaskInfo *task = target->GetTaskByTid(mThreadId);
 
     if (!task) {
       DBGLOG(core, "No task with id {} found", mThreadId);
@@ -607,7 +607,7 @@ struct StepIn final : public ui::UICommand
   {
     auto *target = GetSupervisoOrSendError();
 
-    auto task = target->GetTaskByTid(mThreadId);
+    TaskInfo *task = target->GetTaskByTid(mThreadId);
 
     if (!task->IsStopped()) {
       return WriteResponse(StepInResponse{ false, this });
@@ -673,7 +673,7 @@ struct StepOut final : public ui::UICommand
   Execute() noexcept final
   {
     auto *target = GetSupervisoOrSendError();
-    auto task = target->GetTaskByTid(thread_id);
+    TaskInfo *task = target->GetTaskByTid(thread_id);
 
     if (!task->IsStopped()) {
       return WriteResponse(StepOutResponse{ false, this });
@@ -727,7 +727,7 @@ struct SetBreakpointsResponse final : ui::UIResult
     auto outIt = std::back_inserter(result);
     std::pmr::vector<std::pmr::string> serializedBreakpoints{ arenaAllocator };
     serializedBreakpoints.reserve(mBreakpoints.size());
-    for (auto &bp : mBreakpoints) {
+    for (const Breakpoint &bp : mBreakpoints) {
       serializedBreakpoints.push_back(bp.Serialize(arenaAllocator));
     }
     switch (this->mType) {
@@ -737,7 +737,7 @@ struct SetBreakpointsResponse final : ui::UIResult
         seq,
         mRequestSeq,
         mProcessId,
-        JoinFormatIterator{ serializedBreakpoints, "," });
+        JoinFormatIterator{ .mContainer = serializedBreakpoints, .mDelimiter = "," });
       break;
     case BreakpointRequestKind::function:
       std::format_to(outIt,
@@ -780,7 +780,7 @@ struct SetBreakpointsResponse final : ui::UIResult
 struct SetBreakpoints final : public ui::UICommand
 {
 private:
-  inline void
+  void
   ExecuteDuringConfigPhase(
     Path file, Set<BreakpointSpecification> specs, std::optional<std::string> configToken) noexcept
   {
@@ -816,7 +816,7 @@ public:
   void
   Execute() noexcept final
   {
-    auto target = GetSupervisor();
+    tc::SupervisorState *target = GetSupervisor();
 
     MDB_ASSERT(args.Contains("source"), "setBreakpoints request requires a 'source' field");
     MDB_ASSERT(args.At("source")->Contains("path"), "source field requires a 'path' field");
@@ -894,7 +894,7 @@ struct SetExceptionBreakpoints final : public ui::UICommand
 struct SetInstructionBreakpoints final : public ui::UICommand
 {
 private:
-  inline void
+  void
   ExecuteDuringConfigPhase(Set<BreakpointSpecification> specs, std::optional<std::string> configToken) noexcept
   {
     DBGLOG(core, "setInstructionBreakpoints with no target, postponed");
@@ -928,12 +928,12 @@ public:
   void
   Execute() noexcept final
   {
-    auto target = GetSupervisor();
+    tc::SupervisorState *target = GetSupervisor();
 
     using BP = ui::dap::Breakpoint;
     Set<BreakpointSpecification> specs{};
     const auto ibps = mArgs.AsSpan("breakpoints");
-    auto breakpoints = Allocate<std::pmr::vector<ui::dap::Breakpoint>>();
+    auto *breakpoints = Allocate<std::pmr::vector<ui::dap::Breakpoint>>();
     for (const auto &insBreakpoint : ibps) {
       MDB_ASSERT(
         insBreakpoint.Contains("instructionReference") && insBreakpoint.At("instructionReference")->IsString(),
@@ -946,23 +946,22 @@ public:
       // Request sent during configuration phase
       ExecuteDuringConfigPhase(std::move(specs), get<std::string>(mArgs, kConfigToken));
       return WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::instruction, {} });
-    } else {
-      if (!target) {
-        TODO("Implement sending error response here, e.g. 'No target with id foo'.");
-      }
-      target->SetInstructionBreakpoints(specs);
-
-      auto &userBreakpoints = target->GetUserBreakpoints();
-      breakpoints->reserve(userBreakpoints.mInstructionBreakpoints.size());
-
-      for (const auto &[k, id] : userBreakpoints.mInstructionBreakpoints) {
-        breakpoints->push_back(
-          BP::CreateFromUserBreakpoint(*userBreakpoints.GetUserBreakpoint(id), MemoryResource()));
-      }
-
-      return WriteResponse(
-        SetBreakpointsResponse{ true, this, BreakpointRequestKind::instruction, std::move(*breakpoints) });
     }
+    if (!target) {
+      TODO("Implement sending error response here, e.g. 'No target with id foo'.");
+    }
+    target->SetInstructionBreakpoints(specs);
+
+    auto &userBreakpoints = target->GetUserBreakpoints();
+    breakpoints->reserve(userBreakpoints.mInstructionBreakpoints.size());
+
+    for (const auto &[k, id] : userBreakpoints.mInstructionBreakpoints) {
+      breakpoints->push_back(
+        BP::CreateFromUserBreakpoint(*userBreakpoints.GetUserBreakpoint(id), MemoryResource()));
+    }
+
+    return WriteResponse(
+      SetBreakpointsResponse{ true, this, BreakpointRequestKind::instruction, std::move(*breakpoints) });
   }
   DEFINE_NAME("setInstructionBreakpoints");
   RequiredArguments({ "breakpoints"sv });
@@ -971,7 +970,7 @@ public:
 struct SetFunctionBreakpoints final : public ui::UICommand
 {
 private:
-  inline void
+  void
   ExecuteDuringConfigPhase(Set<BreakpointSpecification> specs, std::optional<std::string> configToken) noexcept
   {
     DBGLOG(core, "setFunctionBreakpoints with no target, postponed");
@@ -1004,11 +1003,11 @@ public:
   void
   Execute() noexcept final
   {
-    auto target = GetSupervisor();
+    tc::SupervisorState *target = GetSupervisor();
 
     using BP = ui::dap::Breakpoint;
     Set<BreakpointSpecification> specs{};
-    auto breakpoints = Allocate<std::pmr::vector<ui::dap::Breakpoint>>();
+    auto *breakpoints = Allocate<std::pmr::vector<ui::dap::Breakpoint>>();
 
     for (const auto &fnbkpt : mArgs.AsSpan("breakpoints")) {
       MDB_ASSERT(fnbkpt.Contains("name") && fnbkpt["name"]->IsString(),
@@ -1027,20 +1026,19 @@ public:
       // Request sent during configuration phase
       ExecuteDuringConfigPhase(std::move(specs), get<std::string>(mArgs, kConfigToken));
       return WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::function, {} });
-    } else {
-      if (!target) {
-        TODO("Implement sending error response here, e.g. 'No target with id foo'.");
-      }
-      target->SetFunctionBreakpoints(specs);
-      for (const auto &user : target->GetUserBreakpoints().AllUserBreakpoints()) {
-        if (user->mKind == LocationUserKind::Function) {
-          breakpoints->push_back(BP::CreateFromUserBreakpoint(*user, MemoryResource()));
-        }
-      }
-
-      return WriteResponse(
-        SetBreakpointsResponse{ true, this, BreakpointRequestKind::function, std::move(*breakpoints) });
     }
+    if (!target) {
+      TODO("Implement sending error response here, e.g. 'No target with id foo'.");
+    }
+    target->SetFunctionBreakpoints(specs);
+    for (const auto &user : target->GetUserBreakpoints().AllUserBreakpoints()) {
+      if (user->mKind == LocationUserKind::Function) {
+        breakpoints->push_back(BP::CreateFromUserBreakpoint(*user, MemoryResource()));
+      }
+    }
+
+    return WriteResponse(
+      SetBreakpointsResponse{ true, this, BreakpointRequestKind::function, std::move(*breakpoints) });
   }
   DEFINE_NAME("setFunctionBreakpoints");
   RequiredArguments({ "breakpoints"sv });
@@ -1083,7 +1081,7 @@ struct WriteMemory final : public ui::UICommand
   {
     auto *target = GetSupervisoOrSendError();
     PROFILE_SCOPE_ARGS("WriteMemory", "command", PEARG("seq", mSeq));
-    auto response = mCommandAllocator->Allocate<WriteMemoryResponse>(false, this);
+    auto *response = mCommandAllocator->Allocate<WriteMemoryResponse>(false, this);
     response->bytes_written = 0;
     if (mAddress) {
       const auto result = target->DoWriteBytes(mAddress.value(), mBytes.data(), mBytes.size());
@@ -1153,7 +1151,7 @@ struct ReadMemory final : public ui::UICommand
         "ReadMemory", "command", PEARG("seq", mSeq), PEARG("addr", *mAddress), PEARG("bytes", mBytes));
       auto *target = GetSupervisoOrSendError();
       auto sv = target->ReadToVector(*mAddress, mBytes, MemoryResource());
-      auto res = mCommandAllocator->Allocate<ReadMemoryResponse>(true, this);
+      auto *res = mCommandAllocator->Allocate<ReadMemoryResponse>(true, this);
 
       // TODO: Make pointer to memory resource shared? Easier to not get wrong. As soon as the response object is
       // created, the allocator is moved into the response object.
@@ -1216,7 +1214,7 @@ struct ConfigurationDone final : public ui::UICommand
     auto token = get<std::string_view>(mArgs, kConfigToken);
     MDB_ASSERT(token.has_value(), "MDB DAP Extension Configuration Phase requires configToken field");
 
-    auto config = mDebugAdapterManager->GetConfigurationFor(*token);
+    auto *config = mDebugAdapterManager->GetConfigurationFor(*token);
     ConfigureState state = config->OnConfigurationDone();
     return WriteResponse(
       ConfigurationDoneResponse{ state != ConfigureState::Completed, /*success*/ true, /*cmd*/ this });
@@ -1263,7 +1261,7 @@ struct Disconnect final : public UICommand
     // We don't allow for child sessions to be terminated, and not have the entire application torn down.
     // We only allow for suspension, or detaching individual child sessions. This behavior is also mimicked for RR
     // sessions, as destroying a process would invalidate the entire application trace.
-    auto target = GetSessionOrSendError();
+    auto *target = GetSessionOrSendError();
 
     if (!target || target->IsExited()) {
       WriteResponse(DisconnectResponse{ true, this });
@@ -1323,7 +1321,7 @@ struct Initialize final : public ui::UICommand
 };
 
 std::pmr::string
-InitializeResponse::Serialize(int, std::pmr::memory_resource *arenaAllocator) const noexcept
+InitializeResponse::Serialize([[maybe_unused]] int seq, std::pmr::memory_resource *arenaAllocator) const noexcept
 {
   // "this _must_ be 1, the first response"
 
@@ -1486,7 +1484,7 @@ struct NativeLaunch final : public Launch
     PROFILE_SCOPE_ARGS(
       "launch", "command", PEARG("program", mProgram), PEARG("progArgs", std::span{ mProgramArgs }));
 
-    auto process = tc::ptrace::Session::ForkExec(
+    tc::ptrace::Session *process = tc::ptrace::Session::ForkExec(
       mDebugAdapterManager, mStopOnEntry, mProgram, mProgramArgs, mBreakpointBehavior);
 
     mDebugAdapterManager->ConnectConfigToken(process->TaskLeaderTid(), mConfigToken);
@@ -1626,9 +1624,9 @@ struct RRLaunch final : public Launch
 
     namespace replay = mdb::tc::replay;
     DBGBUFLOG(core, "[launch]: Creating replay supervisor");
-    auto replaySupervisor = replay::ReplaySupervisor::Create(tc::replay::RRInitOptions{});
+    auto *replaySupervisor = replay::ReplaySupervisor::Create(tc::replay::RRInitOptions{});
 
-    replaySupervisor->StartReplay(mTraceDirectory.data(), [cmd = RefPtr{ this }, replaySupervisor]() -> void {
+    replaySupervisor->StartReplay(mTraceDirectory, [cmd = RefPtr{ this }, replaySupervisor]() -> void {
       DBGBUFLOG(core, "RR Trace has been configured to be replayed!");
       cmd->ExecuteOnReplayStarted(replaySupervisor);
     });
@@ -1668,16 +1666,17 @@ Launch::CreateRequest(UICommandArg arg, const mdbjson::JsonValue &args) noexcept
                                    .transform([](const std::string_view &behavior) {
                                      if (behavior == "Stop all threads"sv) {
                                        return BreakpointBehavior::StopAllThreadsWhenHit;
-                                     } else if (behavior == "Stop single thread"sv) {
-                                       return BreakpointBehavior::StopOnlyThreadThatHit;
-                                     } else {
-                                       return BreakpointBehavior::StopAllThreadsWhenHit;
                                      }
+                                     if (behavior == "Stop single thread"sv) {
+                                       return BreakpointBehavior::StopOnlyThreadThatHit;
+                                     }
+                                     return BreakpointBehavior::StopAllThreadsWhenHit;
                                    })
                                    .value_or(BreakpointBehavior::StopAllThreadsWhenHit);
 
     return NativeLaunch::CreateRequest(std::move(arg), stopOnEntry, behaviorSetting, args);
-  } else if (type == kSessionTypeRr) {
+  }
+  if (type == kSessionTypeRr) {
     return RRLaunch::CreateRequest(std::move(arg), stopOnEntry, BreakpointBehavior::StopAllThreadsWhenHit, args);
   }
 
@@ -1737,15 +1736,15 @@ struct Attach final : public UICommand
       { kSessionTypePtrace, kSessionTypeRr },
     });
 
-  inline static std::vector<InvalidArg>
+  static std::vector<InvalidArg>
   ProcessArgs(const mdbjson::JsonValue &args)
   {
     std::vector<InvalidArg> invalid{};
     for (const auto &required : { "processId" }) {
       if (!args.Contains(required)) {
-        invalid.push_back({ ArgumentError::Missing("required for ptrace attach"), required });
+        invalid.emplace_back(ArgumentError::Missing("required for ptrace attach"), required);
       } else if (!args.Get(required)->IsNumber()) {
-        invalid.push_back({ ArgumentError::RequiredNumberType(), required });
+        invalid.emplace_back(ArgumentError::RequiredNumberType(), required);
       }
     }
     return invalid;
@@ -1759,7 +1758,7 @@ struct Attach final : public UICommand
       return RefPtr<ui::dap::InvalidArgs>::MakeShared(std::move(arg), "attach", std::move(invalid));
     }
 
-    Pid processId = *args.Get("processId")->GetNumber();
+    Pid processId = static_cast<Pid>(*args.Get("processId")->GetNumber());
     MDB_ASSERT(processId > 0, "Expect a process id > 0 (technically 1 too, since it's systemd)");
     return RefPtr<Attach>::MakeShared(std::move(arg), PtraceAttachArgs{ processId });
   }
@@ -1771,9 +1770,11 @@ struct Attach final : public UICommand
     MDB_ASSERT(args.Contains("processId"), "Attach arguments had no 'processId' field.");
     if (type == kSessionTypePtrace) {
       return CreateRequestForPtrace(std::move(arg), args);
-    } else if (type == kSessionTypeRr) {
+    }
+    if (type == kSessionTypeRr) {
       TODO("Multiprocess rr currently handled in UI layer.");
-    } else if (type == kSessionTypeGdbRemote) {
+    }
+    if (type == kSessionTypeGdbRemote) {
       TODO("Removed gdb support, not priority");
     }
     std::vector<InvalidArg> invalid{};
@@ -1922,7 +1923,7 @@ StackTraceResponse::Serialize(int seq, std::pmr::memory_resource *arenaAllocator
     seq,
     mRequestSeq,
     mProcessId,
-    JoinFormatIterator{ stack_frames, "," });
+    JoinFormatIterator{ .mContainer = stack_frames, .mDelimiter = "," });
   return result;
 }
 
@@ -1932,7 +1933,7 @@ StackTrace::Execute() noexcept
   // todo(simon): multiprocessing needs additional work, since DAP does not support it natively.
   auto *target = GetSupervisoOrSendError();
   PROFILE_BEGIN_ARGS("StackTrace", "command", PEARG("seq", mSeq));
-  auto task = target->GetTaskByTid(mThreadId);
+  auto *task = target->GetTaskByTid(mThreadId);
   if (task == nullptr) {
     std::pmr::string err{ MemoryResource() };
     std::format_to(std::back_inserter(err), "Thread with ID {} not found", mThreadId);
@@ -2018,7 +2019,7 @@ struct Scopes final : public UICommand
       std::format_to(std::back_inserter(err), "Invalid variable context for {}", mFrameId);
       return WriteResponse(ErrorResponse{ Request, this, std::move(err), {} });
     }
-    auto frame = ctx->GetFrame(mFrameId);
+    sym::Frame *frame = ctx->GetFrame(mFrameId);
     if (!frame) {
       return WriteResponse(ScopesResponse{ false, this, {} });
     }
@@ -2085,21 +2086,21 @@ Disassemble::Execute() noexcept
 {
   if (mAddress) {
     auto *target = GetSupervisoOrSendError();
-    auto res = new DisassembleResponse{ true, this };
+    auto *res = new DisassembleResponse{ true, this };
     res->mInstructions.reserve(ins_count);
-    int remaining = ins_count;
+    size_t remaining = ins_count;
     if (mInstructionOffset < 0) {
       const int negative_offset = std::abs(mInstructionOffset);
-      sym::DisassembleBackwards(target, mAddress.value(), static_cast<u32>(negative_offset), res->mInstructions);
+      sym::DisassembleBackwards(target, mAddress.value(), negative_offset, res->mInstructions);
       if (negative_offset < ins_count) {
-        for (auto i = 0u; i < res->mInstructions.size(); i++) {
+        for (size_t i = 0; i < res->mInstructions.size(); i++) {
           if (res->mInstructions[i].address == mAddress) {
             keep_range(res->mInstructions, i - negative_offset, i);
             break;
           }
         }
       } else {
-        for (auto i = 0u; i < res->mInstructions.size(); i++) {
+        for (size_t i = 0; i < res->mInstructions.size(); i++) {
           if (res->mInstructions[i].address == mAddress) {
             keep_range(res->mInstructions, i - negative_offset, i - negative_offset + ins_count);
             break;
@@ -2116,9 +2117,8 @@ Disassemble::Execute() noexcept
         target, mAddress.value(), static_cast<u32>(std::abs(mInstructionOffset)), remaining, res->mInstructions);
     }
     return WriteResponse(*res);
-  } else {
-    return WriteResponse(ErrorResponse{ Request, this, "Address parameter could not be parsed.", std::nullopt });
   }
+  return WriteResponse(ErrorResponse{ Request, this, "Address parameter could not be parsed.", std::nullopt });
 }
 
 std::pmr::string
@@ -2196,12 +2196,13 @@ void
 Evaluate::Execute() noexcept
 {
   PROFILE_SCOPE_ARGS("Evaluate", "command", PEARG("seq", mSeq));
+  // NOLINTNEXTLINE
   switch (context) {
   case EvaluationContext::Watch:
     [[fallthrough]];
   case EvaluationContext::Repl: {
     Allocator alloc{ MemoryResource() };
-    auto result = Tracer::Get().EvaluateDebugConsoleExpression(expr, &alloc);
+    auto *result = Tracer::Get().EvaluateDebugConsoleExpression(expr, &alloc);
     return WriteResponse(EvaluateResponse{ true, this, {}, result, {}, {} });
   }
   case EvaluationContext::Hover:
@@ -2307,13 +2308,13 @@ struct VariablesResponse final : public UIResult
   VariablesResponse(bool success, Variables *cmd, std::vector<Ref<sym::Value>> &&vars) noexcept;
   ~VariablesResponse() noexcept override;
   std::pmr::string Serialize(int seq, std::pmr::memory_resource *arenaAllocator) const noexcept final;
-  int mRequestedReference;
+  VariableReferenceId mRequestedReference;
   std::vector<Ref<sym::Value>> mVariables;
 };
 
 Variables::Variables(
-  UICommandArg arg, VariableReferenceId var_ref, std::optional<u32> start, std::optional<u32> count) noexcept
-    : UICommand{ std::move(arg) }, mVariablesReferenceId(var_ref), mStart(start), mCount(count)
+  UICommandArg arg, VariableReferenceId varRef, std::optional<u32> start, std::optional<u32> count) noexcept
+    : UICommand{ std::move(arg) }, mVariablesReferenceId(varRef), mStart(start), mCount(count)
 {
 }
 

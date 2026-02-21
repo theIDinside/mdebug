@@ -12,9 +12,9 @@
 namespace mdb::sym::dw {
 
 /*static*/ ResolvedRangeListOffset
-ResolvedRangeListOffset::Make(sym::dw::UnitData &compUnit, u64 unresolvedOffset) noexcept
+ResolvedRangeListOffset::Make(sym::dw::UnitData &compilationUnit, u64 unresolvedOffset) noexcept
 {
-  return ResolvedRangeListOffset{ compUnit.RangeListBase() + unresolvedOffset };
+  return ResolvedRangeListOffset{ compilationUnit.RangeListBase() + unresolvedOffset };
 }
 
 u32
@@ -52,7 +52,7 @@ ReadOffsetPair(const u8 *ptr, OffsetPair &out) noexcept
 RangeListHeader
 ReadHeader(ElfSection *rnglists, u64 offset)
 {
-  auto ptr = rnglists->GetPointer(offset);
+  const u8 *ptr = rnglists->GetPointer(offset);
   RangeListHeader header{};
   header.mSectionOffset = ptr - rnglists->GetPointer(0);
   ptr = ReadInitialLength(ptr, header.mInitLength, header.mInitLengthLength);
@@ -64,11 +64,11 @@ ReadHeader(ElfSection *rnglists, u64 offset)
 }
 
 std::vector<AddressRange>
-ReadBoundaries(sym::dw::UnitData &cu, ResolvedRangeListOffset resolved) noexcept
+ReadBoundaries(sym::dw::UnitData &compilationUnit, ResolvedRangeListOffset resolved) noexcept
 {
   std::vector<AddressRange> result{};
-  const auto elf = cu.GetObjectFile()->GetElf();
-  auto ptr = elf->mDebugRnglists->GetPointer(resolved.mOffset);
+  const Elf *elf = compilationUnit.GetObjectFile()->GetElf();
+  const u8 *ptr = elf->mDebugRnglists->GetPointer(resolved.mOffset);
   RangeListEntry entry{};
   AddrPtr base = nullptr;
   ptr = ReadEntryType(ptr, entry);
@@ -82,9 +82,9 @@ ReadBoundaries(sym::dw::UnitData &cu, ResolvedRangeListOffset resolved) noexcept
     case RangeListEntry::DW_RLE_base_addressx: {
       u64 addrIndex = 0;
       ptr = DecodeUleb128(ptr, addrIndex);
-      const auto addr_ptr = elf->mDebugAddr->GetPointer(cu.AddressBase() + addrIndex * 8);
+      const u8 *addrPtr = elf->mDebugAddr->GetPointer(compilationUnit.AddressBase() + addrIndex * 8);
       u64 startAddr = 0;
-      std::memcpy(&startAddr, addr_ptr, 8);
+      std::memcpy(&startAddr, addrPtr, 8);
       base = startAddr;
       break;
     }
@@ -94,9 +94,9 @@ ReadBoundaries(sym::dw::UnitData &cu, ResolvedRangeListOffset resolved) noexcept
       ptr = DecodeUleb128(ptr, addrIndex);
       u64 rangeLength = 0;
       ptr = DecodeUleb128(ptr, rangeLength);
-      const auto addr_ptr = elf->mDebugAddr->GetPointer(cu.AddressBase() + (addrIndex * 8));
+      const u8 *addrPtr = elf->mDebugAddr->GetPointer(compilationUnit.AddressBase() + (addrIndex * 8));
       u64 startAddr = 0;
-      std::memcpy(&startAddr, addr_ptr, 8);
+      std::memcpy(&startAddr, addrPtr, 8);
       result.push_back({ startAddr, startAddr + rangeLength });
       break;
     }
@@ -129,11 +129,11 @@ ReadBoundaries(sym::dw::UnitData &cu, ResolvedRangeListOffset resolved) noexcept
 }
 
 AddressRange
-ReadBoundaries(const ElfSection *rnglists, const u64 offset) noexcept
+ReadBoundaries(const ElfSection *rnglists, u64 offset) noexcept
 {
   BoundaryBuilder builder{};
   AddrPtr base = nullptr;
-  auto ptr = rnglists->GetPointer(offset);
+  const u8 *ptr = rnglists->GetPointer(offset);
   const auto read_address = [&]() {
     u64 addr = *(u64 *)ptr;
     ptr += 8;
@@ -187,8 +187,8 @@ ReadBoundaries(const ElfSection *rnglists, const RangeListHeader &header) noexce
 {
   BoundaryBuilder builder{};
   AddrPtr base = nullptr;
-  auto ptr = rnglists->GetPointer(header.FirstEntryOffset());
-  auto end = rnglists->GetPointer(header.NextHeaderOffset());
+  const u8 *ptr = rnglists->GetPointer(header.FirstEntryOffset());
+  const u8 *end = rnglists->GetPointer(header.NextHeaderOffset());
   const auto read_address = [&]() {
     u64 addr = *(u64 *)ptr;
     ptr += 8;

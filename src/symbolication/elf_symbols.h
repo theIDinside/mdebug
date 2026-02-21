@@ -1,7 +1,10 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "../common.h"
+// mdb
+#include <common.h>
 #include <common/typedefs.h>
+
+// std
 #include <string_view>
 
 namespace mdb {
@@ -19,13 +22,13 @@ struct MinSymbol
   AddrPtr address;
   u64 maybe_size;
 
-  constexpr AddrPtr
+  [[nodiscard]] constexpr AddrPtr
   StartPc() const noexcept
   {
     return address;
   }
 
-  constexpr AddrPtr
+  [[nodiscard]] constexpr AddrPtr
   EndPc() const noexcept
   {
     return address + ((maybe_size > 0) ? maybe_size : 1);

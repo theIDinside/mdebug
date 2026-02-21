@@ -16,7 +16,7 @@ AddressRange::Contains(AddrPtr ptr) const noexcept
 bool
 AddressRange::IsValid() const noexcept
 {
-  return low != TPtr<void>{nullptr} && high != TPtr<void>{nullptr};
+  return low != TPtr<void>{ nullptr } && high != TPtr<void>{ nullptr };
 }
 
 AddrPtr
@@ -34,7 +34,7 @@ AddressRange::EndPc() const noexcept
 AddressRange
 AddressRange::relocate(AddressRange range, AddrPtr addr) noexcept
 {
-  return AddressRange{range.low + addr, range.high + addr};
+  return AddressRange{ .low = range.low + addr, .high = range.high + addr };
 }
 
 void
@@ -58,6 +58,6 @@ BoundaryBuilder::CompareBoundary(AddrPtr low, AddrPtr high) noexcept
 AddressRange
 BoundaryBuilder::Build() const noexcept
 {
-  return AddressRange{low, high};
+  return AddressRange{ .low = low, .high = high };
 }
 } // namespace mdb

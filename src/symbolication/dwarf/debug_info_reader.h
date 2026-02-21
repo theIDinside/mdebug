@@ -84,14 +84,14 @@ public:
   }
 
 private:
-  inline constexpr u64
+  [[nodiscard]] constexpr u64
   Format() const noexcept
   {
     return mFormat;
   }
 
-  inline constexpr u64
-  AddressSize() const noexcept
+  [[nodiscard]] static constexpr u64
+  AddressSize() noexcept
   {
     return 8;
   }
@@ -102,7 +102,7 @@ private:
 };
 
 AttributeValue ReadAttributeValue(
-  UnitReader &reader, Abbreviation abbr, const std::vector<i64> &implicit_consts) noexcept;
+  UnitReader &reader, Abbreviation abbr, const std::vector<i64> &implicitConsts) noexcept;
 
 class DieAttributeReader
 {

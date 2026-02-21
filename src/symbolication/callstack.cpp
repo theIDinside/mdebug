@@ -92,9 +92,9 @@ Frame::Task() const noexcept
 }
 
 sym::FunctionSymbol &
-Frame::FullSymbolInfo() noexcept
+Frame::FullSymbolInfo() const noexcept
 {
-  auto ptr = MaybeGetFullSymbolInfo();
+  sym::FunctionSymbol *ptr = MaybeGetFullSymbolInfo();
   if (ptr == nullptr) {
     PANIC("No symbol information for frame, but expected there to be one");
   }
@@ -152,9 +152,9 @@ Frame::MaybeGetMinimalSymbol() const noexcept
 }
 
 IterateFrameSymbols
-Frame::BlockSymbolIterator(FrameVariableKind variables_kind) noexcept
+Frame::BlockSymbolIterator(FrameVariableKind variablesKind) noexcept
 {
-  return IterateFrameSymbols{ *this, variables_kind };
+  return IterateFrameSymbols{ *this, variablesKind };
 }
 
 u32
@@ -187,13 +187,13 @@ Frame::GetInitializedVariables(
 }
 
 u32
-Frame::FrameLocalVariablesCount() noexcept
+Frame::FrameLocalVariablesCount() const noexcept
 {
   return FullSymbolInfo().FrameVariablesCount();
 }
 
 u32
-Frame::FrameParameterCounts() noexcept
+Frame::FrameParameterCounts() const noexcept
 {
   return FullSymbolInfo().GetFunctionArguments().mSymbols.size();
 }
@@ -246,7 +246,7 @@ void
 FrameUnwindState::Reserve(u32 count) noexcept
 {
   mFrameRegisters.reserve(count);
-  std::fill_n(std::back_inserter(mFrameRegisters), count, 0u);
+  std::fill_n(std::back_inserter(mFrameRegisters), count, 0);
 }
 
 void
@@ -322,11 +322,11 @@ void
 CallStack::Initialize() noexcept
 {
   Reset();
-  mUnwoundRegister.push_back({});
+  mUnwoundRegister.emplace_back();
   mUnwoundRegister[0].Reset();
   mUnwoundRegister[0].Reserve(17);
 
-  for (auto i = 0u; i <= 16; ++i) {
+  for (size_t i = 0; i <= 16; ++i) {
     mUnwoundRegister[0].Set(i, mTask->GetDwarfRegister(i));
   }
 }
@@ -411,7 +411,7 @@ CallStack::GetCurrent() noexcept
 bool
 CallStack::ResolveNewFrameRegisters(sym::CFAStateMachine &stateMachine) noexcept
 {
-  auto &cfa = stateMachine.GetCanonicalFrameAddressData();
+  const CFA &cfa = stateMachine.GetCanonicalFrameAddressData();
   int frameLevel = mUnwoundRegister.size() - 1;
   const u64 canonicalFrameAddr =
     stateMachine.GetCanonicalFrameAddressData().mIsExpression
@@ -420,13 +420,13 @@ CallStack::ResolveNewFrameRegisters(sym::CFAStateMachine &stateMachine) noexcept
   DBGLOG(core, "[eh]: canonical frame address computed: 0x{:x}", canonicalFrameAddr);
   stateMachine.SetCanonicalFrameAddress(canonicalFrameAddr);
 
-  mUnwoundRegister.push_back({});
+  mUnwoundRegister.emplace_back();
   auto &newAboveFrame = mUnwoundRegister.back();
   auto &baseFrame = mUnwoundRegister[mUnwoundRegister.size() - 2];
   newAboveFrame.Reserve(baseFrame.RegisterCount());
   baseFrame.SetCanonicalFrameAddress(canonicalFrameAddr);
 
-  for (auto i = 0u; i < mUnwoundRegister[mUnwoundRegister.size() - 2].RegisterCount(); ++i) {
+  for (size_t i = 0; i < mUnwoundRegister[mUnwoundRegister.size() - 2].RegisterCount(); ++i) {
     newAboveFrame.Set(i, stateMachine.ResolveRegisterContents(i, baseFrame, frameLevel));
   }
 
@@ -482,12 +482,12 @@ CallStack::Unwind(const CallStackRequest &req)
       Initialize();
       mFrameProgramCounters.push_back(GetTopMostPc());
       initialized = true;
-      mUnwoundRegister.push_back({});
+      mUnwoundRegister.emplace_back();
       auto [newest, older] = GetCurrent();
       const auto regs = newest->RegisterCount();
       mUnwoundRegister.back().Reserve(regs);
       const auto &cloneFrom = *(mUnwoundRegister.rbegin() + 1);
-      for (auto i = 0u; i < regs; ++i) {
+      for (size_t i = 0; i < regs; ++i) {
         mUnwoundRegister.back().Set(i, cloneFrom.GetRegister(i));
       }
       mUnwoundRegister.back().Set(X86_64_RIP_REGISTER, resumeAddress);

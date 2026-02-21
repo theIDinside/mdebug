@@ -6,7 +6,7 @@
 #include <utils/smartptr.h>
 
 // stdlib
-#include <csignal>
+#include <csignal> // IWYU pragma: keep
 
 namespace mdb {
 class TraceeController;

@@ -1,13 +1,17 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "lib/string_map.h"
-#include "utils/immutable.h"
+
+// mdb
 #include <common.h>
+#include <lib/string_map.h>
+#include <utils/immutable.h>
+#include <utils/indexing.h>
+
+// std
 #include <mutex>
 #include <optional>
 #include <string_view>
-#include <unordered_map>
-#include <utils/indexing.h>
+
 namespace mdb {
 class ObjectFile;
 class TypeStorage;
@@ -85,7 +89,7 @@ public:
   NameIndexShard *CreateShard() noexcept;
   void Merge(const std::vector<NameDieTuple> &nameToDieReferences) noexcept;
   void MergeTypes(
-    NonNullPtr<TypeStorage> objfile, const std::vector<NameTypeDieTuple> &nameToDieReferences) noexcept;
+    NonNullPtr<TypeStorage> typeStorage, const std::vector<NameTypeDieTuple> &nameToDieReferences) noexcept;
 
 private:
   // The mutex only guars insert operations, because when the user is going to use query operations (finding a die

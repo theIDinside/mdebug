@@ -277,6 +277,9 @@ message("Test & building test subjects has been configured to ${BUILD_MDB_TESTS}
 if(BUILD_MDB_TESTS)
   message("Testing enabled...")
   add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/dependencies/googletest)
+  # Suppress warnings from googletest headers
+  target_compile_options(gtest PRIVATE -Wno-character-conversion)
+  target_compile_options(gtest_main PRIVATE -Wno-character-conversion)
   add_subdirectory(test)
   enable_testing()
   # Unit Testing (using googletest)

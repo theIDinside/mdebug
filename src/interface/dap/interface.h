@@ -54,20 +54,20 @@ struct Request
 struct ParseBuffer
 {
 public:
-  ParseBuffer(size_t size) noexcept : size{ 0, 0 }, buffer_size(size)
+  ParseBuffer(size_t size) noexcept : mBufferSize(size)
   {
-    swap_buffers[0] = mmap_buffer<const char>(size);
-    swap_buffers[1] = mmap_buffer<const char>(size);
+    mSwapBuffers[0] = mmap_buffer<const char>(size);
+    mSwapBuffers[1] = mmap_buffer<const char>(size);
   }
 
   // Expects to be able to read from `fd` - if we don't, we've got a bug and we should *not* silently ignore it or
   // handle it. Fail fast.
   bool
-  expect_read_from_fd(int fd) noexcept
+  ExpectReadFromFd(int fd) noexcept
   {
-    VERIFY(current_size() < buffer_size, "Next read would read < 0 bytes!");
+    VERIFY(CurrentSize() < mBufferSize, "Next read would read < 0 bytes!");
     auto start = std::chrono::high_resolution_clock::now();
-    auto read_bytes = read(fd, buffer_current(), buffer_size - current_size());
+    auto read_bytes = read(fd, CurrentBuffer(), mBufferSize - CurrentSize());
     const auto duration_ms = MilliSecondsSince(start);
     MDB_ASSERT(duration_ms < 1500, "Read took *way* too long");
     if (read_bytes == -1) {
@@ -80,79 +80,80 @@ public:
     }
     VERIFY(read_bytes >= 0,
       "Failed to read (max {} out of total {}) from parse buffer. Error: {}. Contents of buffer: '{}'",
-      buffer_size - current_size(),
-      buffer_size,
+      mBufferSize - CurrentSize(),
+      mBufferSize,
       strerror(errno),
-      take_view());
+      TakeView());
     if (read_bytes >= 0) {
-      size[current_buffer_index] += read_bytes;
+      mSize[mCurrentBufferIndex] += read_bytes;
     }
     return true;
   }
 
-  std::string_view
-  take_view() const noexcept
+  [[nodiscard]] std::string_view
+  TakeView() const noexcept
   {
-    return std::string_view{ swap_buffers[current_buffer_index], current_size() };
+    return std::string_view{ mSwapBuffers[mCurrentBufferIndex], CurrentSize() };
   }
 
   // takes data from start .. end, copies it to the swap buffer and swaps buffers
   void
-  swap(size_t start)
+  Swap(size_t start)
   {
-    const auto next_buffer_used = size[current_buffer_index] - start;
-    const auto src = buffer_ptr() + start;
-    size[current_buffer_index] = 0;
-    current_buffer_index = next_buffer_index();
-    const auto dst = buffer_ptr();
+    const auto nextBufferUsed = mSize[mCurrentBufferIndex] - start;
+    auto *const src = BufferPointer() + start;
+    mSize[mCurrentBufferIndex] = 0;
+    mCurrentBufferIndex = NextBufferIndex();
+    auto *const dst = BufferPointer();
     MDB_ASSERT(
-      next_buffer_used < buffer_size, "Offset into buffer outside of {} bytes: {}", buffer_size, next_buffer_used);
-    if (next_buffer_used > 0) {
-      std::memcpy(dst, src, next_buffer_used);
+      nextBufferUsed < mBufferSize, "Offset into buffer outside of {} bytes: {}", mBufferSize, nextBufferUsed);
+    if (nextBufferUsed > 0) {
+      std::memcpy(dst, src, nextBufferUsed);
     }
-    size[current_buffer_index] = next_buffer_used;
+    mSize[mCurrentBufferIndex] = nextBufferUsed;
   }
 
   void
-  clear() noexcept
+  Clear() noexcept
   {
-    current_buffer_index = 0;
-    size[0] = 0;
-    size[1] = 0;
+    mCurrentBufferIndex = 0;
+    mSize[0] = 0;
+    mSize[1] = 0;
   }
 
-  size_t
-  current_size() const noexcept
+  [[nodiscard]] size_t
+  CurrentSize() const noexcept
   {
-    return size[current_buffer_index];
+    return mSize[mCurrentBufferIndex];
   }
 
 private:
-  size_t
-  next_buffer_index() const noexcept
+  [[nodiscard]] size_t
+  NextBufferIndex() const noexcept
   {
-    return (current_buffer_index + 1) % 2;
+    return (mCurrentBufferIndex + 1) % 2;
   }
 
   char *
-  buffer_ptr() noexcept
+  BufferPointer() noexcept
   {
-    const auto ptr = swap_buffers[current_buffer_index];
+    const auto *ptr = mSwapBuffers[mCurrentBufferIndex];
     return const_cast<char *>(ptr);
   }
 
   char *
-  buffer_current() noexcept
+  CurrentBuffer() noexcept
   {
-    return const_cast<char *>(swap_buffers[current_buffer_index]) + size[current_buffer_index];
+    return const_cast<char *>(mSwapBuffers[mCurrentBufferIndex]) + mSize[mCurrentBufferIndex];
   }
-  size_t size[2];
-  const char *swap_buffers[2];
-  size_t current_buffer_index = 0;
-  const size_t buffer_size;
+
+  std::array<size_t, 2> mSize;
+  std::array<const char *, 2> mSwapBuffers;
+  size_t mCurrentBufferIndex = 0;
+  const size_t mBufferSize;
 };
 
-enum class DapClientSession
+enum class DapClientSession : u8
 {
   Launch,
   Attach,
@@ -229,13 +230,13 @@ class DebugAdapterManager
   DebugAdapterManager(DapClientSession session, std::filesystem::path &&path, int socket_fd) noexcept;
   // Most likely used as the initial DA Client Connection (which tends to be via standard in/out, but don't have to
   // be.)
-  DebugAdapterManager(DapClientSession session, int standard_in, int standard_out) noexcept;
+  DebugAdapterManager(DapClientSession type, int readFileDescriptor, int writeFileDescriptor) noexcept;
 
-  std::mutex m{};
+  std::mutex m;
   // Delayed events are used when we want to either delay and event or result or order events and results from a
   // command in a specific order. For instance, during attach/launch, there is non-trivial ordering in how events
   // need to be sent and received and this solves that problem.
-  std::vector<UIResultPtr> mDelayedEvents{};
+  std::vector<UIResultPtr> mDelayedEvents;
 
   void InitAllocators() noexcept;
 
@@ -276,14 +277,14 @@ public:
   void AddSupervisor(tc::SupervisorState *supervisor) noexcept;
   void RemoveSupervisor(tc::SupervisorState *supervisor) noexcept;
   void FlushEvents() noexcept;
-  bool IsClosed() noexcept;
+  bool IsClosed() const noexcept;
 
   // Called when configuration happens for a session with no running processes.
   void OnSessionConfiguredWithSupervisor(
     std::optional<std::string_view> configToken, std::function<void(tc::SupervisorState &)> callback) noexcept;
 };
 
-enum class InterfaceNotificationSource
+enum class InterfaceNotificationSource : u8
 {
   DebugAdapterClient,
   ClientStdout
@@ -307,14 +308,14 @@ struct StandardIo
 
 struct PollState
 {
-  std::vector<pollfd> fds{};
-  std::unordered_map<int, DapNotification> map{};
+  std::vector<pollfd> mFds;
+  std::unordered_map<int, DapNotification> mMap;
 
   constexpr void
   Clear() noexcept
   {
-    fds.clear();
-    map.clear();
+    mFds.clear();
+    mMap.clear();
   }
 
   constexpr void
@@ -326,27 +327,27 @@ struct PollState
   constexpr void
   AddCommandSource(int fd) noexcept
   {
-    fds.push_back({ .fd = fd, .events = POLLIN, .revents = 0 });
-    map[fd] = DapNotification{ .mSource = InterfaceNotificationSource::DebugAdapterClient };
+    mFds.push_back({ .fd = fd, .events = POLLIN, .revents = 0 });
+    mMap[fd] = DapNotification{ .mSource = InterfaceNotificationSource::DebugAdapterClient };
   }
 
   constexpr void
   AddStandardIOSource(int fd, SessionId processId) noexcept
   {
-    fds.push_back({ .fd = fd, .events = POLLIN, .revents = 0 });
-    map[fd] = DapNotification{ .mSource = InterfaceNotificationSource::ClientStdout, .mPid = processId };
+    mFds.push_back({ .fd = fd, .events = POLLIN, .revents = 0 });
+    mMap[fd] = DapNotification{ .mSource = InterfaceNotificationSource::ClientStdout, .mPid = processId };
   }
 
   constexpr auto
   ClientFds() noexcept
   {
-    return std::span{ fds.begin(), fds.end() };
+    return std::span{ mFds.begin(), mFds.end() };
   }
 
   constexpr DapNotification
   Get(int fd) noexcept
   {
-    return map[fd];
+    return mMap[fd];
   }
 };
 
@@ -380,12 +381,12 @@ public:
   void CleanUp() noexcept;
   void FlushEvents() noexcept;
 
-  void ConfigureTty(int master_pty_fd) noexcept;
-  DebugAdapterManager *Get() const noexcept;
+  static void ConfigureTty(int masterPtyFd) noexcept;
+  [[nodiscard]] DebugAdapterManager *Get() const noexcept;
 
 private:
   UIResultPtr PopEvent() noexcept;
-  void WriteProtocolMessage(std::string_view msg) noexcept;
+  void WriteProtocolMessage(std::string_view msg) const noexcept;
 
   mdb::Notifier::WriteEnd mPostedEventNotified;
   mdb::Notifier::ReadEnd mPostedEventListener;

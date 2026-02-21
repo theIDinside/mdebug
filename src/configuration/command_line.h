@@ -2,31 +2,33 @@
 #pragma once
 
 // mdb
-#include "lib/string_map.h"
-#include "utils/format_utils.h"
 #include "utils/util.h"
 #include <common.h>
 #include <common/formatter.h>
 #include <common/typedefs.h>
-#include <expected>
-#include <filesystem>
-#include <sys/ioctl.h>
-#include <type_traits>
+#include <lib/string_map.h>
 #include <utils/algorithm.h>
 #include <utils/command.h>
+#include <utils/format_utils.h>
+
+// system
+#include <sys/ioctl.h>
 // std
 #include <charconv>
+#include <expected>
+#include <filesystem>
 #include <optional>
 #include <span>
 #include <string_view>
+#include <type_traits>
 #include <unordered_set>
 #include <vector>
 
 using namespace std::string_view_literals;
 
 #define TRY_ARG_VAL(value, reader, arg)                                                                           \
-  auto value = reader.NextArgIfValue(arg);                                                                        \
-  if (!value) {                                                                                                   \
+  auto(value) = (reader).NextArgIfValue(arg);                                                                     \
+  if (!(value)) {                                                                                                 \
     return std::unexpected(ParseError::MissingArgValue);                                                          \
   }
 
@@ -73,7 +75,7 @@ template <typename T, typename U = T>
 static std::expected<T, ParserError>
 Ok(U &&value)
 {
-  return std::expected<T, ParserError>{ T{ std::move(value) } };
+  return std::expected<T, ParserError>{ T{ std::forward<U>(value) } };
 }
 
 template <ParseErrorType Type>
@@ -123,9 +125,8 @@ public:
     if (inlineValuePos != value.npos) {
       mInsideInlineArgument = inlineValuePos + 1;
       return value.substr(0, inlineValuePos);
-    } else {
-      ++mIndex;
     }
+    ++mIndex;
     return value;
   }
 
@@ -138,12 +139,12 @@ public:
   std::unexpected<ParserError>
   Error(ParseErrorType type) noexcept
   {
-    return std::unexpected(ParserError{ type, GetArgsCurrentlyBeingParsed() });
+    return std::unexpected(ParserError{ .mError = type, .mInputs = GetArgsCurrentlyBeingParsed() });
   }
 
 private:
   std::vector<std::string_view>
-  GetArgsCurrentlyBeingParsed()
+  GetArgsCurrentlyBeingParsed() const
   {
     // always take the "current one" too, which may only have been partially parsed (due to inline values via
     // foo=bar)
@@ -166,16 +167,16 @@ private:
   int mArgCount;
   const char **mArgs;
   int mIndex{ 1 };
-  std::optional<size_t> mInsideInlineArgument{};
+  std::optional<size_t> mInsideInlineArgument;
   int mRememberedIndex{ 0 };
 };
 
 #ifndef TryExpected
 #define TryExpected(iterator)                                                                                     \
   ({                                                                                                              \
-    auto ___MAYBE_VALUE___ = iterator.GetNext();                                                                  \
+    auto ___MAYBE_VALUE___ = (iterator).GetNext();                                                                \
     if (!___MAYBE_VALUE___) {                                                                                     \
-      return iterator.Error(ParseErrorType::MissingArgValue);                                                     \
+      return (iterator).Error(ParseErrorType::MissingArgValue);                                                   \
     }                                                                                                             \
     *___MAYBE_VALUE___;                                                                                           \
   })
@@ -312,13 +313,13 @@ class CommandLineRegistry
   {
     VERIFY(!shortName.empty() || !longName.empty(), "You've not given this option/command a name!");
     if (!longName.empty()) {
-      VERIFY(mOptions.count(longName) == 0, "Already added option {}", longName);
-      VERIFY(mCommands.count(longName) == 0, "Already added command {}", longName);
+      VERIFY(!mOptions.contains(longName), "Already added option {}", longName);
+      VERIFY(!mCommands.contains(longName), "Already added command {}", longName);
     }
 
     if (!shortName.empty()) {
-      VERIFY(mOptions.count(shortName) == 0, "Already added option {}", shortName);
-      VERIFY(mCommands.count(shortName) == 0, "Already added command {}", shortName);
+      VERIFY(!mOptions.contains(shortName), "Already added option {}", shortName);
+      VERIFY(!mCommands.contains(shortName), "Already added command {}", shortName);
     }
   }
 
@@ -370,7 +371,7 @@ class CommandLineRegistry
   AddEnvironmentVariable(std::string_view name, std::shared_ptr<T> &&item) noexcept
   {
     VERIFY(!mParseCompleted, "You are adding options after parse has completed.");
-    VERIFY(mEnvironmentVariables.count(name) == 0, "Environment variable option already configured.");
+    VERIFY(!mEnvironmentVariables.contains(name), "Environment variable option already configured.");
     auto &map = MapFor<T>();
     map.emplace(name, std::move(item));
   }
@@ -461,7 +462,7 @@ public:
     UpdateLeftColumnWidth(std::is_same_v<T, bool>, shortName, longName);
 
     auto opt = std::make_shared<MemberOption<T, U, ParseInput>>(
-      shortName, longName, message, member, object, parser, T{ std::move(defaultVal) });
+      shortName, longName, message, member, object, parser, T{ std::forward<ConvertibleToT>(defaultVal) });
 
     AddOption(shortName, longName, std::move(opt));
   }
@@ -498,7 +499,7 @@ public:
     UpdateLeftColumnWidth(/* isFlag */ false, "", name);
 
     auto opt = std::make_shared<MemberOption<T, U, std::string_view>>(
-      "", name, message, member, object, parser, T{ std::move(defaultVal) });
+      "", name, message, member, object, parser, T{ std::forward<ConvertibleToT>(defaultVal) });
 
     AddEnvironmentVariable(name, std::move(opt));
   }
@@ -543,9 +544,8 @@ template <typename ResultType> struct FromTraits;
       auto [ptr, ec] = std::from_chars(arg.data(), arg.data() + arg.size(), number);                              \
       if (ec == std::errc()) {                                                                                    \
         return number;                                                                                            \
-      } else {                                                                                                    \
-        return it.Error(ParseErrorType::InvalidFormat);                                                           \
       }                                                                                                           \
+      return it.Error(ParseErrorType::InvalidFormat);                                                             \
     }                                                                                                             \
                                                                                                                   \
     static ParseResult<NumberType>                                                                                \
@@ -557,9 +557,8 @@ template <typename ResultType> struct FromTraits;
       auto [ptr, ec] = std::from_chars(arg.data(), arg.data() + arg.size(), number);                              \
       if (ec == std::errc()) {                                                                                    \
         return number;                                                                                            \
-      } else {                                                                                                    \
-        return std::unexpected(mdb::cfg::ParserError{ ParseErrorType::InvalidFormat, { arg } });                  \
       }                                                                                                           \
+      return std::unexpected(mdb::cfg::ParserError{ ParseErrorType::InvalidFormat, { arg } });                    \
     }                                                                                                             \
   };
 

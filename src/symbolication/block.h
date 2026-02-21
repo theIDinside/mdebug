@@ -16,13 +16,13 @@ struct AddressRange
   static constexpr AddressRange
   MaxMin() noexcept
   {
-    return AddressRange{AddrPtr::Max(), AddrPtr::Min()};
+    return AddressRange{ .low = AddrPtr::Max(), .high = AddrPtr::Min() };
   }
   bool Contains(AddressRange &range) const noexcept;
-  bool Contains(AddrPtr ptr) const noexcept;
-  bool IsValid() const noexcept;
-  AddrPtr StartPc() const noexcept;
-  AddrPtr EndPc() const noexcept;
+  [[nodiscard]] bool Contains(AddrPtr ptr) const noexcept;
+  [[nodiscard]] bool IsValid() const noexcept;
+  [[nodiscard]] AddrPtr StartPc() const noexcept;
+  [[nodiscard]] AddrPtr EndPc() const noexcept;
 
   static AddressRange relocate(AddressRange range, AddrPtr addr) noexcept;
 
@@ -41,13 +41,13 @@ struct AddressRange
 
 class BoundaryBuilder
 {
-  AddrPtr high{nullptr};
-  AddrPtr low{std::numeric_limits<u64>::max()};
+  AddrPtr high{ nullptr };
+  AddrPtr low{ std::numeric_limits<u64>::max() };
 
 public:
   void CompareSwapLow(AddrPtr pc) noexcept;
   void CompareSwapHigh(AddrPtr pc) noexcept;
   void CompareBoundary(AddrPtr low, AddrPtr high) noexcept;
-  AddressRange Build() const noexcept;
+  [[nodiscard]] AddressRange Build() const noexcept;
 };
 } // namespace mdb

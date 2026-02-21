@@ -2,20 +2,20 @@
 #pragma once
 
 // mdb
-#include "interface/dap/types.h"
 #include <bp.h>
 #include <bp_spec.h>
 #include <common/typedefs.h>
 #include <event_queue_types.h>
 #include <events/event.h>
-#include <memory_resource>
-#include <set>
+#include <interface/dap/types.h>
+
 #include <utils/immutable.h>
 
 // std
 #include <condition_variable>
 #include <cstdint>
 #include <functional>
+#include <memory_resource>
 #include <thread>
 
 namespace rr {
@@ -167,7 +167,7 @@ struct EventCallback
   void *user_data;
 
   constexpr void
-  operator()(const SupervisorEvent &evt)
+  operator()(const SupervisorEvent &evt) const
   {
     return event_handler(evt, user_data);
   }
@@ -208,9 +208,9 @@ struct SessionBreakpointSpecs
 
   std::unordered_map<SourceCodeFileName,
     std::unordered_map<BreakpointSpecification, std::shared_ptr<BreakpointInfo>>>
-    mSourceCodeBreakpoints{};
-  std::unordered_map<BreakpointSpecification, std::shared_ptr<BreakpointInfo>> mFunctionBreakpoints{};
-  std::unordered_map<BreakpointSpecification, std::shared_ptr<BreakpointInfo>> mInstructionBreakpoints{};
+    mSourceCodeBreakpoints;
+  std::unordered_map<BreakpointSpecification, std::shared_ptr<BreakpointInfo>> mFunctionBreakpoints;
+  std::unordered_map<BreakpointSpecification, std::shared_ptr<BreakpointInfo>> mInstructionBreakpoints;
 
   static std::shared_ptr<SessionBreakpointSpecs> Create() noexcept;
   static std::shared_ptr<BreakpointInfo> CreateBreakpointInfo();
@@ -251,7 +251,7 @@ class ReplaySupervisor
   std::optional<ResumeReplay> mLastRequestedResume{ std::nullopt };
   bool mIsReversing{ false };
   // If process is not registered with ReplaySupervisor, we don't notify the debugger of events related to it.
-  std::vector<Pid> mTracedProcessesPids{};
+  std::vector<Pid> mTracedProcessesPids;
   bool mRequestedShutdown{ false };
 
   EventCallback mEventCallback;
@@ -261,16 +261,16 @@ class ReplaySupervisor
 
   rr::BreakStatus *mSavedBreakStatus{ nullptr };
 
-  std::condition_variable mHasReplayCondVar{};
-  std::mutex mCondVarMutex{};
+  std::condition_variable mHasReplayCondVar;
+  std::mutex mCondVarMutex;
   std::string mTraceDir;
   bool mIssuedStartRequest{ false };
 
-  std::mutex mRequestMutex{};
-  std::condition_variable mRequestCondVar{};
+  std::mutex mRequestMutex;
+  std::condition_variable mRequestCondVar;
   bool mHasRequest;
 
-  std::unordered_map<SupervisorSessionEventType, std::function<void()>> mSupervisorEvents{};
+  std::unordered_map<SupervisorSessionEventType, std::function<void()>> mSupervisorEvents;
   std::shared_ptr<SessionBreakpointSpecs> mSessionBreakpoints{ nullptr };
 
   void PublishEvent(const SupervisorEvent &evt) noexcept;
@@ -278,9 +278,9 @@ class ReplaySupervisor
     const TraceFrameTaskContext &taskContext = TraceFrameTaskContext::None()) noexcept;
 
   void InitializeDebugSession();
-  void SetWillNeedResume(const rr::BreakStatus *break_status);
+  void SetWillNeedResume(const rr::BreakStatus *breakStatus);
   StopKind CheckStopKind(pid_t recTid, int syscallNumber, const rr::TraceFrame &traceFrame) noexcept;
-  std::optional<SupervisorEvent> FromReplayResult(const rr::ReplayResult &result, ResumeReplay &replay_request);
+  std::optional<SupervisorEvent> FromReplayResult(const rr::ReplayResult &result, ResumeReplay &replayRequest);
 
   rr::ReplayResult PerformResume();
   bool InterruptCheck();
@@ -298,7 +298,7 @@ public:
   void SetIsReversing(bool value) noexcept;
   void Erase(Session *session) noexcept;
   static ReplaySupervisor *Create(const RRInitOptions &initOptions = {}) noexcept;
-  void StartReplay(const char *traceDir, std::function<void()> onStartCompleted) noexcept;
+  void StartReplay(std::string_view traceDir, std::function<void()> onStartCompleted) noexcept;
   std::vector<Pid> CurrentLiveProcesses() const noexcept;
   Session *CachedSupervisor(Tid taskLeader) const noexcept;
   void AddSupervisor(NonNullPtr<Session> session) noexcept;
@@ -322,7 +322,7 @@ public:
   void Shutdown();
 
   /// Replay control
-  bool RequestResume(ResumeReplay resume_tracee);
+  bool RequestResume(ResumeReplay resumeTracee);
 
   // A front end is going to need this, for instance to determine if "do we
   // need to step over a breakpoint the next thing we do?" One solution would
@@ -337,20 +337,20 @@ public:
    * `rec_tid` is the task who will be reported in the stop event, regardless of
    * who's actually executing in the internal supervisor.
    */
-  bool RequestInterrupt(pid_t rec_tid);
+  bool RequestInterrupt(pid_t recordedTid);
 
   /// Read & Write operations
-  int64_t ReadMemory(pid_t rec_tid, uintptr_t address, int buf_size, void *buf);
+  int64_t ReadMemory(pid_t recordedTid, uintptr_t address, int bufSize, void *buf);
 
-  RegisterCacheData ReadRegisters(pid_t rec_tid);
+  RegisterCacheData ReadRegisters(pid_t recordedTid);
 
-  bool SetBreakpoint(pid_t rec_tid, BreakpointRequest req);
-  bool SetWatchpoint(pid_t rec_tid, WatchpointRequest req);
-  bool RemoveBreakpoint(pid_t rec_tid, BreakpointRequest req);
-  bool RemoveWatchpoint(pid_t rec_tid, WatchpointRequest req);
-  const char *ExecedFile(pid_t rec_tid) const;
-  const std::vector<std::uint8_t> &GetAuxv(pid_t rec_tid);
-  rr::ReplayTask *GetTask(pid_t rec_tid) const;
+  bool SetBreakpoint(pid_t recordedTid, BreakpointRequest req);
+  bool SetWatchpoint(pid_t recordedTid, WatchpointRequest req);
+  bool RemoveBreakpoint(pid_t recordedTid, BreakpointRequest req);
+  bool RemoveWatchpoint(pid_t recordedTid, WatchpointRequest req);
+  const char *ExecedFile(pid_t recordedTid) const;
+  const std::vector<std::uint8_t> &GetAuxv(pid_t recordedTid) const;
+  rr::ReplayTask *GetTask(pid_t recordedTid) const;
   bool IsReversing() const;
   uint64_t CurrentFrameTime() const noexcept;
 
@@ -364,7 +364,7 @@ public:
   constexpr void
   IterateSupervisors(Fn &&fn) noexcept
   {
-    for (auto supervisor : mTimelineSupervisors) {
+    for (Session *supervisor : mTimelineSupervisors) {
       fn(supervisor);
     }
   }

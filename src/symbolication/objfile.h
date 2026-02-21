@@ -85,8 +85,8 @@ struct ElfSection;
 
 struct BreakpointLookup
 {
-  AddrPtr address;
-  std::optional<LocationSourceInfo> loc_src_info;
+  AddrPtr mAddress;
+  std::optional<LocationSourceInfo> mLocationSourceInfo;
 };
 
 /**
@@ -180,8 +180,8 @@ public:
   auto GetDieReference(u64 offset) noexcept -> sym::dw::DieReference;
   auto GetNameIndex() noexcept -> sym::dw::ObjectFileNameIndex *;
 
-  auto AddInitializedCompileUnits(std::span<sym::CompilationUnit *> new_cus) noexcept -> void;
-  auto AddTypeUnits(std::span<sym::dw::UnitData *> type_units) noexcept -> void;
+  auto AddInitializedCompileUnits(std::span<sym::CompilationUnit *> newCompileUnits) noexcept -> void;
+  auto AddTypeUnits(std::span<sym::dw::UnitData *> typeUnits) noexcept -> void;
   auto AddSourceCodeFile(sym::dw::SourceCodeFile::Ref file) noexcept -> void;
   auto ReadDebugRanges(u64 sectionOffset) noexcept -> std::vector<AddressRange>;
 
@@ -269,19 +269,19 @@ public:
   [[nodiscard]] auto HighProgramCounter() const noexcept -> AddrPtr;
 
   auto GetMinimalFunctionSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
-  auto SearchMinimalSymbolFunctionInfo(AddrPtr pc) noexcept -> const MinSymbol *;
+  auto SearchMinimalSymbolFunctionInfo(AddrPtr pc) const noexcept -> const MinSymbol *;
   auto GetMinimalSymbol(std::string_view name) noexcept -> std::optional<MinSymbol>;
   auto GetObjectFilePath() const noexcept -> Path;
 
   auto LookupFunctionBreakpointBySpec(const BreakpointSpecification &spec) const noexcept
     -> std::vector<BreakpointLookup>;
-  auto GetId() noexcept -> Pid;
+  auto GetId() const noexcept -> Pid;
   auto GetTextSection() const noexcept -> const ElfSection *;
   void ForEachTypeMatching(
     std::string_view pattern, bool exactPattern, const std::function<void(sym::Type *type)> &onEachType) const;
 
 private:
-  auto GetVariables(sym::FrameVariableKind variables_kind, tc::SupervisorState &tc, sym::Frame &frame) noexcept
+  auto GetVariables(sym::FrameVariableKind variablesKind, tc::SupervisorState &tc, sym::Frame &frame) noexcept
     -> std::vector<Ref<sym::Value>>;
 };
 

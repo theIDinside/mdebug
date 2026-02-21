@@ -32,7 +32,7 @@ replace_regex(T &str)
   const std::string str_replacement = "std::string";
   str = std::regex_replace(str, str_regex, str_replacement);
 
-  const std::string allocator_replacement = "";
+  const std::string allocator_replacement;
   str = std::regex_replace(str, allocator_regex, allocator_replacement);
 }
 
@@ -55,7 +55,7 @@ panic_exit()
 }
 
 [[noreturn]] void
-panic(std::string_view err_msg, const char *functionName, const char *file, int line, int strip_levels)
+panic(std::string_view err_msg, const char *functionName, const char *file, size_t line, size_t strip_levels)
 {
   using enum Channel;
   constexpr auto logIf = [](std::string_view msg) { logging::Logger::LogIf(core, msg); };
@@ -76,7 +76,7 @@ panic(std::string_view err_msg, const char *functionName, const char *file, int 
     goto ifbacktrace_failed;
   }
 
-  for (int j = strip_levels; j < nptrs; j++) {
+  for (size_t j = strip_levels; j < nptrs; j++) {
     auto demangle_len = 0UL;
     int stat = 0;
     std::string_view view{ strings[j] };
@@ -114,7 +114,7 @@ ifbacktrace_failed:
 }
 
 void
-panic(std::string_view err_msg, const std::source_location &loc, int strip_levels)
+panic(std::string_view err_msg, const std::source_location &loc, size_t strip_levels)
 {
   panic(err_msg, loc.function_name(), loc.file_name(), loc.line(), strip_levels);
 }

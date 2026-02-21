@@ -55,7 +55,9 @@ CommandLineRegistry::ParseEnvironmentVariableOptions() noexcept
 
   for (const auto &[k, v] : mEnvironmentVariables) {
     if (auto value = getenv(k.data()); value) {
-      v->Parse(std::string_view{ value });
+      const auto res = v->Parse(std::string_view{ value });
+      if (!res.has_value()) {
+      }
     }
   }
 }

@@ -514,7 +514,7 @@ Session::UpdateFunctionBreakpoints(
       auto result = sym->LookupFunctionBreakpointBySpec(spec);
       for (auto &&lookup : result) {
         auto user = mUserBreakpoints.CreateBreakpointLocationUser<Breakpoint>(*this,
-          GetOrCreateBreakpointLocationWithSourceLoc(lookup.address, std::move(lookup.loc_src_info)),
+          GetOrCreateBreakpointLocationWithSourceLoc(lookup.mAddress, std::move(lookup.mLocationSourceInfo)),
           mTaskLeader,
           LocationUserKind::Function,
           spec.Clone());
@@ -728,7 +728,7 @@ Session::DoBreakpointsUpdate(const SymbolFile &newSymbolFile) noexcept
     auto result = newSymbolFile.LookupFunctionBreakpointBySpec(spec);
     for (auto &&lookup : result) {
       auto user = mUserBreakpoints.CreateBreakpointLocationUser<Breakpoint>(*this,
-        GetOrCreateBreakpointLocationWithSourceLoc(lookup.address, std::move(lookup.loc_src_info)),
+        GetOrCreateBreakpointLocationWithSourceLoc(lookup.mAddress, std::move(lookup.mLocationSourceInfo)),
         mTaskLeader,
         LocationUserKind::Function,
         spec.Clone());

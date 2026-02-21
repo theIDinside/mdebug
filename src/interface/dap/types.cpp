@@ -71,21 +71,19 @@ Breakpoint::CreateFromUserBreakpoint(
       .mColumn = userBreakpoint.Column(),
       .mSourcePath = userBreakpoint.GetSourceFile(),
       .mErrorMessage = {} };
-  } else {
-    return Breakpoint{ .mId = userBreakpoint.mId,
-      .mVerified = false,
-      .mAddress = nullptr,
-      .mLine = {},
-      .mColumn = {},
-      .mSourcePath = {},
-      .mErrorMessage = userBreakpoint.GetErrorMessage(rsrc) };
   }
+  return Breakpoint{ .mId = userBreakpoint.mId,
+    .mVerified = false,
+    .mAddress = nullptr,
+    .mLine = {},
+    .mColumn = {},
+    .mSourcePath = {},
+    .mErrorMessage = userBreakpoint.GetErrorMessage(rsrc) };
 }
 
 VariablesReference::VariablesReference(
   NonNullPtr<SymbolFile> objectFile, int ref, int thread, int frameId, int parent, EntityType type) noexcept
-    : mId(ref), mThreadId(thread), mFrameId(frameId), mParentId(parent), mType(type), mScopeType(),
-      mObjectFile(objectFile)
+    : mId(ref), mThreadId(thread), mFrameId(frameId), mParentId(parent), mType(type), mObjectFile(objectFile)
 {
 }
 
@@ -112,8 +110,7 @@ VariablesReference::ParentVariablesReference() const noexcept
 {
   if (HasParent()) {
     return mParentId;
-  } else {
-    return std::nullopt;
   }
+  return std::nullopt;
 }
 }; // namespace mdb::ui::dap

@@ -31,10 +31,11 @@ struct RangeListHeader
 struct ResolvedRangeListOffset
 {
   u64 mOffset;
-  static ResolvedRangeListOffset Make(sym::dw::UnitData &cu, u64 unresolvedOffset) noexcept;
+  static ResolvedRangeListOffset Make(sym::dw::UnitData &compilationUnit, u64 unresolvedOffset) noexcept;
 };
 
 AddressRange ReadBoundaries(const ElfSection *rnglists, const RangeListHeader &header) noexcept;
-AddressRange ReadBoundaries(const ElfSection *rnglists, const u64 offset) noexcept;
-std::vector<AddressRange> ReadBoundaries(sym::dw::UnitData &cu, ResolvedRangeListOffset offset) noexcept;
+AddressRange ReadBoundaries(const ElfSection *rnglists, u64 offset) noexcept;
+std::vector<AddressRange> ReadBoundaries(
+  sym::dw::UnitData &compilationUnit, ResolvedRangeListOffset offset) noexcept;
 } // namespace mdb::sym::dw

@@ -54,14 +54,14 @@ struct InitializedEvent final : public ui::UIResult
   }
   ~InitializedEvent() noexcept final = default;
   std::optional<SessionId> mDeterminedProcessId;
-  std::pmr::string Serialize(int monotonicId, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
 
 struct TerminatedEvent final : public ui::UIResult
 {
   TerminatedEvent(SessionId pid) noexcept : ui::UIResult(pid) {}
   ~TerminatedEvent() noexcept final = default;
-  std::pmr::string Serialize(int monotonicId, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
 
 static constexpr std::string_view reasons[3]{ "new", "changed", "removed" };
@@ -89,7 +89,7 @@ struct ModuleEvent final : public ui::UIResult
   std::optional<std::string> mSymbolObjectFilePath;
   std::optional<std::string> version;
 
-  std::pmr::string Serialize(int monotonicid, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
 
 struct ContinuedEvent final : public ui::UIResult
@@ -99,7 +99,7 @@ struct ContinuedEvent final : public ui::UIResult
   // allThreadsContinued
   bool mAllThreadsContinued;
   ContinuedEvent(SessionId pid, Tid tid, bool allThreads) noexcept;
-  std::pmr::string Serialize(int monotonicid, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
 
 struct CustomEvent final : public ui::UIResult
@@ -111,7 +111,7 @@ struct CustomEvent final : public ui::UIResult
       : ui::UIResult(pid), mCustomEventName(std::move(name)), mSerializedBody(std::move(serializedBodyContents))
   {
   }
-  std::pmr::string Serialize(int monotonicid, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
 
 struct Process final : public ui::UIResult
@@ -120,7 +120,7 @@ struct Process final : public ui::UIResult
   Pid mNewProcessId;
   bool mIsLocal;
   Process(Pid parentProcessId, Pid childProcessId, std::string name, bool isLocal) noexcept;
-  std::pmr::string Serialize(int monotonicid, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
 
 struct ExitedEvent final : public ui::UIResult
@@ -128,7 +128,7 @@ struct ExitedEvent final : public ui::UIResult
   // exitCode
   int mExitCode;
   ExitedEvent(SessionId pid, int exitCode) noexcept;
-  std::pmr::string Serialize(int monotonicid, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
 
 struct ThreadEvent final : public ui::UIResult
@@ -136,7 +136,7 @@ struct ThreadEvent final : public ui::UIResult
   ThreadEvent(SessionId sessionId, ThreadReason reason, Tid tid) noexcept;
   ThreadEvent(SessionId sessionId, const Clone &event) noexcept;
   ~ThreadEvent() noexcept override = default;
-  std::pmr::string Serialize(int monotonicid, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
   ThreadReason mReason;
   Tid mTid;
 };
@@ -163,7 +163,7 @@ struct StoppedEvent final : public ui::UIResult
   std::optional<std::vector<Pid>> mProcesses{ std::nullopt };
 
   void SetExistingProcesses(std::vector<Pid> processes);
-  std::pmr::string Serialize(int monotonicid, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
 
 struct BreakpointEvent final : public ui::UIResult
@@ -176,7 +176,7 @@ struct BreakpointEvent final : public ui::UIResult
     std::optional<std::string> message,
     const UserBreakpoint *breakpoint) noexcept;
   ~BreakpointEvent() override = default;
-  std::pmr::string Serialize(int monotonicid, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource *allocator = nullptr) const noexcept final;
 };
 
 struct OutputEvent final : public ui::UIResult
@@ -186,7 +186,7 @@ struct OutputEvent final : public ui::UIResult
 
   std::string_view mCategory; // static category strings exist, we always pass literals to this
   std::string mOutput;
-  std::pmr::string Serialize(int monotonicid, std::pmr::memory_resource *allocator) const noexcept final;
+  std::pmr::string Serialize(int seq, std::pmr::memory_resource *allocator) const noexcept final;
 };
 
 }; // namespace ui::dap

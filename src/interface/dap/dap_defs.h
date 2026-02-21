@@ -39,7 +39,7 @@ enum class FieldType : std::uint8_t
 enum class CommandType : std::uint8_t
 {
 #define DAP_COMMANDS
-#define ITEM(name, value) name = value,
+#define ITEM(name, value) name = (value),
 #include "dap.defs"
 #undef ITEM
 #undef DAP_COMMANDS
@@ -68,7 +68,7 @@ to_str(CommandType command) noexcept
 enum class Events : std::uint8_t
 {
 #define DAP_EVENTS
-#define ITEM(name, value) name = value,
+#define ITEM(name, value) name = (value),
 #include "dap.defs"
 #undef ITEM
 #undef DAP_EVENTS
@@ -91,7 +91,7 @@ to_str(Events command) noexcept
 enum class ProtocolMessageType : std::uint8_t
 {
 #define DAP_PROTOCOL_MESSAGE
-#define ITEM(name, value) name = value,
+#define ITEM(name, value) name = (value),
 #include "dap.defs"
 #undef ITEM
 #undef DAP_PROTOCOL_MESSAGE
@@ -114,7 +114,7 @@ to_str(ProtocolMessageType msg) noexcept
 enum class StoppedReason : std::uint8_t
 {
 #define DAP_STOPPED_REASON
-#define ITEM(name, value) name = value,
+#define ITEM(name, value) name = (value),
 #include "dap.defs"
 #undef ITEM
 #undef DAP_STOPPED_REASON

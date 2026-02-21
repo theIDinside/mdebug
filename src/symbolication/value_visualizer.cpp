@@ -159,12 +159,14 @@ ResolveRange::Resolve(const VariableContext &context, ValueRange valueRange) noe
   (void)valueRange;
 }
 
+/* static */
 std::optional<std::pmr::string>
 PrimitiveSerializer::FormatEnum(Type &t, std::span<const u8> span, std::pmr::memory_resource *allocator) noexcept
 {
   const EnumeratorValues &enums = t.GetEnumerations();
   EnumeratorConstValue value;
   if (enums.mIsSigned) {
+    // NOLINTNEXTLINE
     switch (t.size_of) {
     case 1:
       value.i = BitCopy<i8>(span);
@@ -240,6 +242,7 @@ BitCopyAndMaybeProcessBitField(std::span<const u8> from, const Value &value)
 }
 
 // TODO(simon): add optimization where we can format our value directly to an outbuf?
+/* static */
 std::optional<std::pmr::string>
 PrimitiveSerializer::FormatValue(const Value &valueObject, std::pmr::memory_resource *allocator) noexcept
 {
@@ -253,7 +256,7 @@ PrimitiveSerializer::FormatValue(const Value &valueObject, std::pmr::memory_reso
   std::pmr::string result{ allocator };
 
   if (type->IsReference()) {
-    const std::uintptr_t ptr = BitCopy<std::uintptr_t>(span);
+    const auto ptr = BitCopy<std::uintptr_t>(span);
     FormatAndReturn(result, "0x{:x}", ptr);
   }
 
@@ -290,6 +293,7 @@ PrimitiveSerializer::FormatValue(const Value &valueObject, std::pmr::memory_reso
   }
   case BaseTypeEncoding::DW_ATE_signed_char:
   case BaseTypeEncoding::DW_ATE_signed:
+    // NOLINTNEXTLINE
     switch (size_of) {
     case 1: {
       auto value = BitCopyAndMaybeProcessBitField<signed char>(span, valueObject);
@@ -311,6 +315,7 @@ PrimitiveSerializer::FormatValue(const Value &valueObject, std::pmr::memory_reso
     break;
   case BaseTypeEncoding::DW_ATE_unsigned_char:
   case BaseTypeEncoding::DW_ATE_unsigned:
+    // NOLINTNEXTLINE
     switch (size_of) {
     case 1: {
       u8 value = BitCopyAndMaybeProcessBitField<unsigned char>(span, valueObject);
@@ -471,6 +476,7 @@ FormatEnum(Type &t, std::span<const u8> span, Iterator &result) noexcept
   const EnumeratorValues &enums = t.GetEnumerations();
   EnumeratorConstValue value;
   if (enums.mIsSigned) {
+    // NOLINTNEXTLINE
     switch (t.size_of) {
     case 1:
       value.i = BitCopy<i8>(span);
@@ -486,6 +492,7 @@ FormatEnum(Type &t, std::span<const u8> span, Iterator &result) noexcept
       break;
     }
   } else {
+    // NOLINTNEXTLINE
     switch (t.size_of) {
     case 1:
       value.u = BitCopy<u8>(span);
@@ -568,6 +575,7 @@ FormatValue(Value &value, Iterator iter) noexcept
   }
   case BaseTypeEncoding::DW_ATE_signed_char:
   case BaseTypeEncoding::DW_ATE_signed:
+    // NOLINTNEXTLINE
     switch (size_of) {
     case 1: {
       auto value = BitCopy<signed char>(span);
@@ -589,6 +597,7 @@ FormatValue(Value &value, Iterator iter) noexcept
     break;
   case BaseTypeEncoding::DW_ATE_unsigned_char:
   case BaseTypeEncoding::DW_ATE_unsigned:
+    // NOLINTNEXTLINE
     switch (size_of) {
     case 1: {
       u8 value = BitCopy<unsigned char>(span);

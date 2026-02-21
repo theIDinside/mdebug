@@ -41,7 +41,7 @@ struct VerifyResult
   }
 
   constexpr
-  operator bool() noexcept
+  operator bool() const noexcept
   {
     return mArgError->has_value();
   }
@@ -52,11 +52,11 @@ struct VerifyField
   static constexpr auto CurrentEnumMax = 5;
   std::string_view mName;
   FieldType mType;
-  std::string_view mErrorMessage{ "" };
+  std::string_view mErrorMessage;
   std::array<std::string_view, CurrentEnumMax> mEnumValues{};
   u8 mEnumVariants{ 0 };
 
-  constexpr std::span<const std::string_view>
+  [[nodiscard]] constexpr std::span<const std::string_view>
   GetEnumValues() const noexcept
   {
     if (mEnumVariants == 0) {
@@ -81,17 +81,31 @@ struct VerifyField
     }
   }
 
-  constexpr bool
+  [[nodiscard]] constexpr bool
   HasEnumVariant(std::string_view value) const noexcept
   {
-    for (const auto v : GetEnumValues()) {
-      if (value == v) {
-        return true;
-      }
-    }
-    return false;
+    return std::ranges::any_of(GetEnumValues(), [&](auto v) { return v == value; });
   }
 };
+
+template <typename JsonValueType>
+constexpr VerifyResult
+VerifyAddress(const JsonValueType &j, std::string_view fieldName)
+{
+  if (!j.IsString()) {
+    return VerifyResult{ std::make_pair(ArgumentError::RequiredStringType(), fieldName) };
+  }
+  std::string_view s = j.UncheckedGetStringView();
+  if (s.starts_with("0x")) {
+    s.remove_prefix(2);
+  }
+  for (auto ch : s) {
+    if (!std::isxdigit(ch)) {
+      return VerifyResult{ std::make_pair(ArgumentError::RequiredAddressType(), fieldName) };
+    }
+  }
+  return VerifyResult{ std::nullopt };
+}
 
 template <size_t Size> struct VerifyMap
 {
@@ -99,26 +113,13 @@ template <size_t Size> struct VerifyMap
 
   template <typename JsonValueType>
   constexpr VerifyResult
-  isOK(const JsonValueType &j, std::string_view fieldName) const noexcept
+  IsOK(const JsonValueType &j, std::string_view fieldName) const noexcept
   {
     if (const auto it = FindIf(mFields, [&](const auto &f) { return fieldName == f.mName; });
       it != std::cend(mFields)) {
       switch (it->mType) {
       case FieldType::Address:
-        if (!j.IsString()) {
-          return VerifyResult{ std::make_pair(ArgumentError::RequiredStringType(), fieldName) };
-        } else {
-          std::string_view s = j.UncheckedGetStringView();
-          if (s.starts_with("0x")) {
-            s.remove_prefix(2);
-          }
-          for (auto ch : s) {
-            if (!std::isxdigit(ch)) {
-              return VerifyResult{ std::make_pair(ArgumentError::RequiredAddressType(), fieldName) };
-            }
-          }
-          return VerifyResult{ std::nullopt };
-        }
+        return VerifyAddress(j, fieldName);
       case FieldType::String:
         if (!j.IsString()) {
           return VerifyResult{ std::make_pair(ArgumentError::RequiredStringType(), fieldName) };
@@ -160,9 +161,8 @@ template <size_t Size> struct VerifyMap
         break;
       }
       return VerifyResult{ std::nullopt };
-    } else {
-      return VerifyResult{ std::nullopt };
     }
+    return VerifyResult{ std::nullopt };
   }
 };
 
@@ -173,7 +173,7 @@ template <size_t Size> struct VerifyMap
   constexpr static auto ValidateArg(std::string_view argName, const Json &argContents) noexcept                   \
     -> std::optional<InvalidArg>                                                                                  \
   {                                                                                                               \
-    if (auto err = ArgTypes.isOK(argContents, argName); err) {                                                    \
+    if (auto err = ArgTypes.IsOK(argContents, argName); err) {                                                    \
       return std::move(err).take();                                                                               \
     }                                                                                                             \
     return std::nullopt;                                                                                          \
@@ -184,7 +184,7 @@ class Message
   std::pmr::string mFormat;
   std::pmr::unordered_map<std::pmr::string, std::pmr::string> mVariables;
   bool mShowUser{ true };
-  std::optional<int> mId{};
+  std::optional<int> mId;
 
 public:
   Message(std::string_view message, std::pmr::memory_resource *rsrc) noexcept;

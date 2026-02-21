@@ -28,9 +28,8 @@ public:
     auto res = l.cu <=> r.cu;
     if (res == std::strong_ordering::equal) {
       return l.die <=> r.die;
-    } else {
-      return res;
     }
+    return res;
   }
 
   friend constexpr auto
@@ -54,25 +53,25 @@ public:
   auto
   begin() noexcept
   {
-    return DieSiblingIterator{cu, die};
+    return DieSiblingIterator{ cu, die };
   }
 
   auto
   end() noexcept
   {
-    return DieSiblingIterator{cu, nullptr};
+    return DieSiblingIterator{ cu, nullptr };
   }
 
-  auto
+  [[nodiscard]] auto
   cbegin() const noexcept
   {
-    return DieSiblingIterator{cu, die};
+    return DieSiblingIterator{ cu, die };
   }
 
-  auto
+  [[nodiscard]] auto
   cend() const noexcept
   {
-    return DieSiblingIterator{cu, nullptr};
+    return DieSiblingIterator{ cu, nullptr };
   }
 };
 } // namespace mdb::sym::dw

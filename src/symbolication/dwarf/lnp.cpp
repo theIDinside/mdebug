@@ -67,7 +67,7 @@ LNPHeader::file(u32 f_index) const noexcept
 
   for (const auto &[i, f] : Enumerate(mFileEntries)) {
     if (i == adjusted_index) {
-      const auto dir_index = lnp_index(f.dir_index, mVersion);
+      const auto dir_index = LineNumberProgramIndex(f.dir_index, mVersion);
       return std::filesystem::path{ std::format("{}/{}", mDirectories[dir_index].path, f.file_name) }
         .lexically_normal();
     }
@@ -122,7 +122,7 @@ LNPHeader::CacheLNPFilePaths() noexcept
 
   for (const auto &f : mFileEntries) {
     path_buf.clear();
-    const auto index = lnp_index(f.dir_index, mVersion);
+    const auto index = LineNumberProgramIndex(f.dir_index, mVersion);
     // this should be safe, because the string_views (which we call .data() on) are originally null-terminated
     // and we have not made copies.
     if (mDirectories.empty()) {

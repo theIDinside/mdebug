@@ -21,17 +21,17 @@ UnitDataTask::UnitDataTask(ObjectFile *obj, std::span<UnitHeader> headers) noexc
 static void
 ProcessCompilationUnitBoundary(const AttributeValue &rangesOffset, sym::CompilationUnit &src) noexcept
 {
-  auto cu = src.GetDwarfUnitData();
+  UnitData *cu = src.GetDwarfUnitData();
   const auto version = cu->GetHeader().Version();
   MDB_ASSERT(version == DwarfVersion::D4 || version == DwarfVersion::D5, "Dwarf version not supported");
-  auto elf = cu->GetObjectFile()->GetElf();
+  const Elf *elf = cu->GetObjectFile()->GetElf();
 
   if (version == DwarfVersion::D4) {
-    auto bytePtr = reinterpret_cast<const u64 *>(elf->mDebugRanges->GetPointer(rangesOffset.AsAddress()));
+    const u64 *bytePtr = reinterpret_cast<const u64 *>(elf->mDebugRanges->GetPointer(rangesOffset.AsAddress()));
     auto lowest = UINTMAX_MAX;
-    auto highest = 0ul;
-    auto start = 0ul;
-    auto end = 1ul;
+    auto highest = 0UL;
+    auto start = 0UL;
+    auto end = 1UL;
     bool foundRange = false;
     while (true) {
       start = *bytePtr++;
@@ -43,15 +43,13 @@ ProcessCompilationUnitBoundary(const AttributeValue &rangesOffset, sym::Compilat
         // de-duplicated. Which is shite.
         if (end == 0) {
           break;
-        } else {
-          continue;
         }
-      } else {
-        if (start != 1 && end != 1) {
-          lowest = std::min(start, lowest);
-          highest = std::max(end, highest);
-          foundRange = true;
-        }
+        continue;
+      }
+      if (start != 1 && end != 1) {
+        lowest = std::min(start, lowest);
+        highest = std::max(end, highest);
+        foundRange = true;
       }
     }
     if (foundRange) {
@@ -86,13 +84,13 @@ UnitDataTask::ExecuteTask(std::pmr::memory_resource *) noexcept
   std::vector<UnitData *> result;
   result.reserve(mCompilationUnitsToParse.size());
   for (const auto &header : mCompilationUnitsToParse) {
-    auto unit_data = PrepareUnitData(objectFile, header);
-    result.push_back(unit_data);
+    UnitData *ud = PrepareUnitData(objectFile, header);
+    result.push_back(ud);
   }
 
   std::vector<sym::CompilationUnit *> compilationUnits;
 
-  for (auto dwarfUnit :
+  for (UnitData *dwarfUnit :
     result | std::views::filter([](UnitData *unit) { return unit->IsCompilationUnitLike(); })) {
     UnitReader reader{ dwarfUnit };
 
@@ -102,7 +100,7 @@ UnitDataTask::ExecuteTask(std::pmr::memory_resource *) noexcept
     }
 
     const auto [abbr_code, uleb_sz] = reader.DecodeULEB128();
-    auto &abbrs = dwarfUnit->GetAbbreviation(abbr_code);
+    const AbbreviationInfo &abbrs = dwarfUnit->GetAbbreviation(abbr_code);
     auto *newCompilationUnit = new sym::CompilationUnit{ dwarfUnit };
 
     std::optional<AddrPtr> low;
@@ -113,13 +111,13 @@ UnitDataTask::ExecuteTask(std::pmr::memory_resource *) noexcept
       case Attribute::DW_AT_stmt_list: {
         const auto attr = ReadAttributeValue(reader, abbr, abbrs.mImplicitConsts);
         const auto offset = attr.AsAddress();
-        auto header = dw::LNPHeader::ReadLineNumberProgramHeader(objectFile, offset);
+        LNPHeader *header = dw::LNPHeader::ReadLineNumberProgramHeader(objectFile, offset);
         newCompilationUnit->ProcessSourceCodeFiles(header);
         break;
       }
       case Attribute::DW_AT_name: {
         const auto attr = ReadAttributeValue(reader, abbr, abbrs.mImplicitConsts);
-        const auto name = attr.AsCString();
+        const char *name = attr.AsCString();
         newCompilationUnit->SetUnitName(name);
         break;
       }

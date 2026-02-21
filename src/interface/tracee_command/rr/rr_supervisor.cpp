@@ -1,27 +1,25 @@
 /** LICENSE TEMPLATE */
 #include "rr_supervisor.h"
 #include "TraceFrame.h"
-#include "interface/dap/events.h"
 
 // mdb
 #include <common/macros.h>
 #include <common/traits.h>
-#include <cstdlib>
-#include <cstring>
 #include <event_queue.h>
 #include <interface/tracee_command/rr/rr_session.h>
 #include <mdbsys/stop_status.h>
-#include <sys/user.h>
 #include <task.h>
 #include <utils/format_utils.h>
 #include <utils/logger.h>
 
 // std
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <utility>
 // system
+#include <sys/user.h>
 
 // rr
 #include <Flags.h>
@@ -37,9 +35,12 @@ namespace fs = std::filesystem;
     mTimeline->current_session().current_frame_time() __VA_OPT__(, ) __VA_ARGS__);
 
 namespace mdb {
+
+using ReplayTask = rr::ReplayTask;
+
 /* static */
 TraceFrameTaskContext
-TraceFrameTaskContext::From(int signal, const rr::ReplayTask &task, pid_t newChild) noexcept
+TraceFrameTaskContext::From(int signal, const ReplayTask &task, pid_t newChild) noexcept
 {
   return TraceFrameTaskContext{ .mRIP = task.regs().ip().register_value(),
     .mFrameTime = task.current_frame_time(),
@@ -55,7 +56,7 @@ TraceFrameTaskContext::From(int signal, const rr::ReplayTask &task, pid_t newChi
 namespace mdb::tc::replay {
 
 void
-ReplaySupervisor::StartReplay(const char *traceDir, std::function<void()> onStartCompleted) noexcept
+ReplaySupervisor::StartReplay(std::string_view traceDir, std::function<void()> onStartCompleted) noexcept
 {
   mTraceDir = traceDir;
   mIssuedStartRequest = true;
@@ -77,7 +78,7 @@ ReplaySupervisor::CurrentLiveProcesses() const noexcept
 Session *
 ReplaySupervisor::CachedSupervisor(Tid taskLeader) const noexcept
 {
-  for (auto s : mTimelineSupervisors) {
+  for (Session *s : mTimelineSupervisors) {
     if (s->TaskLeaderTid() == taskLeader) {
       return s;
     }
@@ -109,12 +110,7 @@ ReplaySupervisor::IsTracing(Pid pid) noexcept
 bool
 ReplaySupervisor::IsIgnoring(Pid pid) noexcept
 {
-  for (const auto &processId : mInitOptions.mIgnoredProcesses) {
-    if (processId == pid) {
-      return true;
-    }
-  }
-  return false;
+  return std::ranges::any_of(mInitOptions.mIgnoredProcesses, [pid](auto id) { return id == pid; });
 }
 
 void
@@ -132,11 +128,10 @@ ReplaySupervisor::ProcessRequests()
     MDB_ASSERT(mReplayRunning == false, "Expected replay to not be running");
     mReplayRunning = true;
 
-    while (true && !InterruptCheck()) {
+    while (!InterruptCheck()) {
       const auto replayResult = PerformResume();
-      auto replayedTask = replayResult.break_status.task();
-
-      auto t = mTimeline->current_session().current_task();
+      rr::Task *replayedTask = replayResult.break_status.task();
+      ReplayTask *t = mTimeline->current_session().current_task();
 
       if (replayResult.status == rr::REPLAY_EXITED) {
         RRLOG("replay exited");
@@ -150,14 +145,6 @@ ReplaySupervisor::ProcessRequests()
 
       if (const auto res = FromReplayResult(replayResult, *mRequestedResume);
         res && !IsIgnoring(t->thread_group()->tgid)) {
-        RRLOG("replayed one step that needs stop notification, replayed_task = {}, current_task={}, exited={}, "
-              "fastfwd={}, res={}, pc=0x{:x}",
-          replayedTask ? replayedTask->rec_tid : 0,
-          t ? t->rec_tid : 0,
-          replayResult.break_status.task_exit,
-          replayResult.did_fast_forward,
-          (int)replayResult.status,
-          t ? t->ip().register_value() : 0);
         PublishEvent(*res);
         InterruptCheck();
         SetWillNeedResume(&replayResult.break_status);
@@ -168,7 +155,6 @@ ReplaySupervisor::ProcessRequests()
       }
     }
   } else if (mRequestedShutdown) {
-    RRLOG("Destroying timeline");
     mTimeline.reset(nullptr);
     mKeepRunning = false;
     PublishSessionEvent(SupervisorSessionEventType::TraceEnded);
@@ -227,22 +213,20 @@ ReplaySupervisor::Shutdown()
 }
 
 bool
-ReplaySupervisor::RequestResume(ResumeReplay resumeReplayOp)
+ReplaySupervisor::RequestResume(ResumeReplay resumeTracee)
 {
-  RRLOG("requesting resume");
   if (IsReplaying()) {
-    RRLOG("supervisor is running - resume request discarded!");
     return false;
   }
 
   // We don't want to iterate and clear state _every_ time we reverse
   // we only want to do it the first time (and only if we hit breakpoint while reversing).
-  if (!mIsReversing && resumeReplayOp.direction == RR_DIR_REVERSE) {
+  if (!mIsReversing && resumeTracee.direction == RR_DIR_REVERSE) {
     OnReverse();
   }
-  SetIsReversing(resumeReplayOp.direction == RR_DIR_REVERSE);
+  SetIsReversing(resumeTracee.direction == RR_DIR_REVERSE);
 
-  mRequestedResume = resumeReplayOp;
+  mRequestedResume = resumeTracee;
 
   NotifyResumed();
   return true;
@@ -258,13 +242,13 @@ ReplaySupervisor::GetTaskToResume() const
 }
 
 bool
-ReplaySupervisor::RequestInterrupt(pid_t rec_tid)
+ReplaySupervisor::RequestInterrupt(pid_t recordedTid)
 {
   if (!IsReplaying()) {
     return true;
   }
   mPendingInterrupt = true;
-  mLastPendingInterruptFor = rec_tid;
+  mLastPendingInterruptFor = recordedTid;
   return false;
 }
 
@@ -274,32 +258,31 @@ ReplaySupervisor::RequestInterrupt(pid_t rec_tid)
   }
 
 int64_t
-ReplaySupervisor::ReadMemory(pid_t recTid, uintptr_t address, int bufferSize, void *buf)
+ReplaySupervisor::ReadMemory(pid_t recordedTid, uintptr_t address, int bufSize, void *buf)
 {
   MUTEX_RUNNING(-1);
-  DBGBUFLOG(core, "Read from target {} at 0x{:x}, {} bytes", recTid, address, bufferSize);
+  DBGBUFLOG(core, "Read from target {} at 0x{:x}, {} bytes", recordedTid, address, bufSize);
 
-  rr::ReplayTask *t = mTimeline->current_session().find_task(recTid);
-  MDB_ASSERT(t != nullptr, "Expected to find task {}", recTid);
+  ReplayTask *t = mTimeline->current_session().find_task(recordedTid);
+  MDB_ASSERT(t != nullptr, "Expected to find task {}", recordedTid);
   if (!t) {
     return -1;
   }
-  auto read = t->read_bytes_fallible(address, bufferSize, buf);
+  auto read = t->read_bytes_fallible(address, bufSize, buf);
   return read;
 }
 
 RegisterCacheData
-ReplaySupervisor::ReadRegisters(pid_t recTid)
+ReplaySupervisor::ReadRegisters(pid_t recordedTid)
 {
-  auto task = mTimeline->current_session().find_task(recTid);
+  ReplayTask *task = mTimeline->current_session().find_task(recordedTid);
   if (!task) {
     std::vector<pid_t> threads;
     threads.reserve(mTimeline->current_session().tasks().size());
     for (const auto &t : mTimeline->current_session().tasks()) {
       threads.push_back(t.second->rec_tid);
     }
-    RRLOG("Could not read registers, task {} not found, tasks={}", recTid, JoinFormatIterator{ threads });
-    return RegisterCacheData{ nullptr, 0 };
+    return RegisterCacheData{ .buf = nullptr, .cache_size = 0 };
   }
 
   const auto &regs = task->regs();
@@ -308,22 +291,19 @@ ReplaySupervisor::ReadRegisters(pid_t recTid)
 }
 
 bool
-ReplaySupervisor::SetBreakpoint(pid_t rec_tid, BreakpointRequest req)
+ReplaySupervisor::SetBreakpoint(pid_t recordedTid, BreakpointRequest req)
 {
-  RRLOG(
-    "setting {} breakpoint task={}, addr=0x{:x}", req.is_hardware ? "hardware" : "software", rec_tid, req.address);
   MUTEX_RUNNING(false);
 
-  auto task = mTimeline->current_session().find_task(rec_tid);
+  ReplayTask *task = mTimeline->current_session().find_task(recordedTid);
   if (req.is_hardware) {
     return mTimeline->add_watchpoint(task, rr::remote_ptr<void>{ req.address }, 1, rr::WatchType::WATCH_EXEC);
-  } else {
-    return mTimeline->add_breakpoint(task, rr::remote_code_ptr{ req.address });
   }
+  return mTimeline->add_breakpoint(task, rr::remote_code_ptr{ req.address });
 }
 
 bool
-ReplaySupervisor::SetWatchpoint(pid_t recTid, WatchpointRequest req)
+ReplaySupervisor::SetWatchpoint(pid_t recordedTid, WatchpointRequest req)
 {
   rr::WatchType type = rr::WATCH_READWRITE;
   using enum WatchpointRequestType;
@@ -342,17 +322,16 @@ ReplaySupervisor::SetWatchpoint(pid_t recTid, WatchpointRequest req)
   }
 
   MUTEX_RUNNING(false);
-  auto task = mTimeline->current_session().find_task(recTid);
+  ReplayTask *task = mTimeline->current_session().find_task(recordedTid);
   mTimeline->add_watchpoint(task, rr::remote_ptr<void>{ req.address }, req.size, type);
   return true;
 }
 
 bool
-ReplaySupervisor::RemoveBreakpoint(pid_t rec_tid, BreakpointRequest req)
+ReplaySupervisor::RemoveBreakpoint(pid_t recordedTid, BreakpointRequest req)
 {
-  RRLOG("removing {} for {}", req.is_hardware ? "watchpoint" : "breakpoint", rec_tid);
   MUTEX_RUNNING(false);
-  auto task = mTimeline->current_session().find_task(rec_tid);
+  rr::ReplayTask *task = mTimeline->current_session().find_task(recordedTid);
   if (req.is_hardware) {
     mTimeline->remove_watchpoint(task, rr::remote_ptr<void>{ req.address }, 1, rr::WatchType::WATCH_EXEC);
   } else {
@@ -362,10 +341,10 @@ ReplaySupervisor::RemoveBreakpoint(pid_t rec_tid, BreakpointRequest req)
 }
 
 bool
-ReplaySupervisor::RemoveWatchpoint(pid_t rec_tid, WatchpointRequest req)
+ReplaySupervisor::RemoveWatchpoint(pid_t recordedTid, WatchpointRequest req)
 {
   MUTEX_RUNNING(false);
-  auto task = mTimeline->current_session().find_task(rec_tid);
+  auto task = mTimeline->current_session().find_task(recordedTid);
   rr::WatchType t{};
   using enum WatchpointRequestType;
   switch (req.type) {
@@ -385,24 +364,24 @@ ReplaySupervisor::RemoveWatchpoint(pid_t rec_tid, WatchpointRequest req)
 }
 
 const char *
-ReplaySupervisor::ExecedFile(pid_t recTid) const
+ReplaySupervisor::ExecedFile(pid_t recordedTid) const
 {
   MUTEX_RUNNING(nullptr);
-  rr::ReplayTask *task = GetTask(recTid);
+  ReplayTask *task = GetTask(recordedTid);
   return task->vm()->exe_image().c_str();
 }
 
 const std::vector<std::uint8_t> &
-ReplaySupervisor::GetAuxv(pid_t rec_tid)
+ReplaySupervisor::GetAuxv(pid_t recordedTid) const
 {
-  auto *task = GetTask(rec_tid);
+  auto *task = GetTask(recordedTid);
   return task->vm()->saved_auxv();
 }
 
-rr::ReplayTask *
-ReplaySupervisor::GetTask(pid_t rec_tid) const
+ReplayTask *
+ReplaySupervisor::GetTask(pid_t recordedTid) const
 {
-  return mTimeline->current_session().find_task(rec_tid);
+  return mTimeline->current_session().find_task(recordedTid);
 }
 
 bool
@@ -432,9 +411,9 @@ CreateReplayFlags()
 }
 
 static bool
-IsAtLastThreadExit(const rr::BreakStatus &break_status)
+IsAtLastThreadExit(const rr::BreakStatus &breakStatus)
 {
-  return break_status.task_exit && break_status.task_context.thread_group->task_set().size() <= 1;
+  return breakStatus.task_exit && breakStatus.task_context.thread_group->task_set().size() <= 1;
 }
 
 // N.B. - Refactored from GdbServer.cc with the same name
@@ -444,16 +423,15 @@ TargetEventReached(
 {
   if (options.goto_event == -1) {
     return IsAtLastThreadExit(result.break_status);
-  } else {
-    return timeline.current_session().current_trace_frame().time() > options.goto_event;
   }
+  return timeline.current_session().current_trace_frame().time() > options.goto_event;
 }
 
 // N.B. - Refactored from GdbServer.cc with the same name
 static bool
 AtTarget(rr::ReplayTimeline &timeline,
   const StartReplayOptions &options,
-  std::atomic<bool> &stop_flag,
+  std::atomic<bool> &stopFlag,
   const rr::ReplayResult &result)
 {
   if (!timeline.current_session().done_initial_exec()) {
@@ -470,7 +448,7 @@ AtTarget(rr::ReplayTimeline &timeline,
   }
   // We don't need synchronization with other operations, this is simply a flag.
   // if it's true it is true if not, its not, so to speak
-  if (stop_flag.load(std::memory_order_relaxed)) {
+  if (stopFlag.load(std::memory_order_relaxed)) {
     return true;
   }
 
@@ -491,7 +469,6 @@ void
 ReplaySupervisor::PublishSessionEvent(
   SupervisorSessionEventType type, const TraceFrameTaskContext &taskContext) noexcept
 {
-  DBGLOG(core, "publish session event {}", type);
   PublishEvent(SessionEvent{ .mType = type, .mTaskInfo = taskContext });
 }
 
@@ -509,31 +486,24 @@ ReplaySupervisor::InitializeDebugSession()
   rr::ReplayResult result;
   bool isAtTarget = false;
   do {
-    RRLOG("perform replay step forward");
     result = mTimeline->replay_step_forward(rr::RUN_CONTINUE);
     if (result.status == rr::REPLAY_EXITED) {
-      RRLOG("Debugger was not launched before end of trace.");
       return;
     }
-    RRLOG("check if at target");
     isAtTarget = AtTarget(*mTimeline, opts, mPendingInterrupt, result);
-    RRLOG("not at target, yet");
   } while (!isAtTarget);
-  RRLOG("Reached replay target");
 
   // Turn off pending interrupt now, if it was set because from now on, a
   // pending interrupt actually means notifying a user of something too (e.g.
   // "paused", "interrupted reverse continue" etc)
   mPendingInterrupt = false;
 
-  rr::ReplayTask *t = mTimeline->current_session().current_task();
+  ReplayTask *t = mTimeline->current_session().current_task();
 
   const rr::FrameTime firstRunEvent = std::max(t->vm()->first_run_event(), t->thread_group()->first_run_event());
   if (firstRunEvent) {
     mTimeline->set_reverse_execution_barrier_event(firstRunEvent);
   }
-
-  RRLOG("publish 'started' event");
 
   PublishSessionEvent(SupervisorSessionEventType::TraceStarted, TraceFrameTaskContext::From(0, *t));
 }
@@ -541,7 +511,6 @@ ReplaySupervisor::InitializeDebugSession()
 void
 ReplaySupervisor::SetWillNeedResume(const rr::BreakStatus *breakStatus)
 {
-  RRLOG("supervisor stopped, will need explicit resume from user");
   mReplayRunning = false;
   mRequestedResume.reset();
 
@@ -653,7 +622,7 @@ ReplaySupervisor::FromReplayResult(const rr::ReplayResult &result, ResumeReplay 
   const auto &traceFrame = mTimeline->current_session().last_replayed_trace_frame();
 
   const auto toInfo = [&](Pid childPid = 0) {
-    auto task = static_cast<rr::ReplayTask *>(result.break_status.task());
+    auto *task = static_cast<ReplayTask *>(result.break_status.task());
     if (!task) {
       task = mTimeline->current_session().find_task(traceFrame.tid());
     }
@@ -663,27 +632,16 @@ ReplaySupervisor::FromReplayResult(const rr::ReplayResult &result, ResumeReplay 
   };
 
   // check if last replayed_event was a thread group mutating syscall.
-  auto &ev = traceFrame.event();
+  const rr::Event &ev = traceFrame.event();
   if (ev.is_syscall_event() && result.created_task.has_value()) {
     stopKind = CheckStopKind(result.break_status.task()->rec_tid, ev.Syscall().number, traceFrame);
     if (stopKind >= StopKind::Forked && stopKind <= StopKind::Cloned) {
-      DBGBUFLOG(core, "new child is = {}", *result.created_task);
       return std::make_optional(ReplayEvent{ .mTaskInfo = toInfo(*result.created_task), .mStopKind = stopKind });
-    } else if (stopKind == StopKind::Execed) {
+    }
+    if (stopKind == StopKind::Execed) {
       return std::make_optional(ReplayEvent{ .mTaskInfo = toInfo(), .mStopKind = stopKind });
     }
   }
-  // if (ev.is_syscall_event() && ev.Syscall().state == rr::EXITING_SYSCALL && !traceFrame.regs().syscall_failed())
-  // {
-  //   stopKind = CheckStopKind(result.break_status.task()->rec_tid, ev.Syscall().number, traceFrame);
-  //   if (stopKind >= StopKind::Forked && stopKind <= StopKind::Cloned) {
-  //     DBGBUFLOG(core, "new child is = {}", traceFrame.regs().syscall_result());
-  //     return std::make_optional(
-  //       ReplayEvent{ .mTaskInfo = toInfo(traceFrame.regs().syscall_result()), .mStopKind = stopKind });
-  //   } else if (stopKind == StopKind::Execed) {
-  //     return std::make_optional(ReplayEvent{ .mTaskInfo = toInfo(), .mStopKind = stopKind });
-  //   }
-  // }
 
   if (result.break_status.breakpoint_hit || !result.break_status.watchpoints_hit.empty()) {
     return std::make_optional(ReplayEvent{ .mTaskInfo = toInfo(),
@@ -696,7 +654,7 @@ ReplaySupervisor::FromReplayResult(const rr::ReplayResult &result, ResumeReplay 
     return std::make_optional(ReplayEvent{ .mTaskInfo = toInfo(), .mStopKind = StopKind::Exited });
   }
 
-  if (result.break_status.signal.get() != nullptr) {
+  if (result.break_status.signal != nullptr) {
     return std::make_optional(ReplayEvent{ .mTaskInfo = toInfo(), .mStopKind = StopKind::Signalled });
   }
 
@@ -734,7 +692,7 @@ ReplaySupervisor::InterruptCheck()
   if (mPendingInterrupt) {
     SetWillNeedResume(nullptr);
     // No stop event is pending, we will push an "interrupt stop-event"
-    rr::ReplayTask *reportTask = nullptr;
+    ReplayTask *reportTask = nullptr;
     reportTask = mLastPendingInterruptFor == 0 ? mTimeline->current_session().current_task()
                                                : mTimeline->current_session().find_task(mLastPendingInterruptFor);
     // This literally should never happen.
@@ -759,7 +717,7 @@ ReplaySupervisor::NotifyResumed() noexcept
 void
 ReplaySupervisor::OnReverse() noexcept
 {
-  for (auto session : mTimelineSupervisors) {
+  for (Session *session : mTimelineSupervisors) {
     for (auto &t : session->GetThreads()) {
       t.mTask->ClearBreakpointLocStatus();
       t.mTask->SetInvalidCache();
@@ -998,8 +956,8 @@ ReplaySupervisor::SpawnSupervisorThread() noexcept
       auto traceDir = mTraceDir;
       if (!fs::exists(traceDir)) {
         // FIXME(!): Remove this hard coding later
-        const auto $HOME = std::getenv("HOME");
-        const auto RR_TRACE_DIR = ".local/share/rr";
+        const auto *$HOME = std::getenv("HOME");
+        const auto *RR_TRACE_DIR = ".local/share/rr";
         traceDir = std::format("{}/{}/{}", $HOME, RR_TRACE_DIR, mTraceDir);
         MDB_ASSERT(fs::exists(traceDir), "Expected directory {} to exist", traceDir);
       }

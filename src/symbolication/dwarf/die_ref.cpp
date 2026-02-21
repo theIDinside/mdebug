@@ -9,13 +9,13 @@
 namespace mdb::sym::dw {
 
 std::tuple<u64, const char *>
-PrepareCompileUnitPreDwarf5(UnitData *cu, const DieMetaData &unitDie)
+PrepareCompileUnitPreDwarf5(UnitData *compilationUnit, const DieMetaData &unitDie)
 {
-  MDB_ASSERT(cu && std::to_underlying(cu->GetHeader().Version()) < 5,
+  MDB_ASSERT(compilationUnit && std::to_underlying(compilationUnit->GetHeader().Version()) < 5,
     "Expected compillation to not be null and version <= 4");
-  UnitReader reader{ cu };
+  UnitReader reader{ compilationUnit };
   reader.SeekDie(unitDie);
-  const auto &attrs = cu->GetAbbreviation(unitDie.mAbbreviationCode);
+  const auto &attrs = compilationUnit->GetAbbreviation(unitDie.mAbbreviationCode);
 
   u64 offset = std::numeric_limits<u64>::max();
   const char *directory = nullptr;
@@ -167,14 +167,13 @@ DieReference::ReadAttribute(Attribute attr) const noexcept
   UnitReader reader{ mUnitData };
   const auto &attrs = mUnitData->GetAbbreviation(mDebugInfoEntry->mAbbreviationCode);
   reader.SeekDie(*mDebugInfoEntry);
-  auto i = 0u;
+  long i = 0;
   for (auto attribute : attrs.mAttributes) {
     if (attribute.mName == attr) {
       reader.SkipAttributes(std::span{ attrs.mAttributes.begin(), attrs.mAttributes.begin() + i });
       return ReadAttributeValue(reader, attribute, attrs.mImplicitConsts);
-    } else {
-      ++i;
     }
+    ++i;
   }
   return std::nullopt;
 }

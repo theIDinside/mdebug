@@ -260,7 +260,7 @@ public:
     std::span<const BreakpointSpecification> remove) noexcept;
 
   virtual void SetSourceBreakpoints(
-    const std::filesystem::path &sourceFilePath, const Set<BreakpointSpecification> &bps) noexcept;
+    const std::filesystem::path &sourceFilePath, const Set<BreakpointSpecification> &breakpoints) noexcept;
 
   virtual void SetInstructionBreakpoints(const Set<BreakpointSpecification> &breakpoints) noexcept;
   virtual void SetFunctionBreakpoints(const Set<BreakpointSpecification> &breakpoints) noexcept;
@@ -541,7 +541,7 @@ public:
   }
 };
 
-auto CreateSymbolFileIfNew(SupervisorState &supervisorState, const Path &path, AddrPtr addr) noexcept
+auto CreateSymbolFileIfNew(SupervisorState &supervisorState, const Path &path, AddrPtr baseAddress) noexcept
   -> std::shared_ptr<SymbolFile>;
 
 } // namespace mdb::tc

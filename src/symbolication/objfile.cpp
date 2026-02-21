@@ -169,9 +169,8 @@ ObjectFile::SearchMinimalSymbolFunctionInfo(AddrPtr pc) noexcept
   auto prev = (it == std::begin(mMinimalFunctionSymbolsSorted)) ? it : it - 1;
   if (prev->StartPc() <= pc && prev->EndPc() >= pc) {
     return prev.base();
-  } else {
-    return nullptr;
   }
+  return nullptr;
 }
 
 std::optional<MinSymbol>
@@ -179,9 +178,8 @@ ObjectFile::FindMinimalObjectSymbol(std::string_view name) noexcept
 {
   if (mMinimalObjectSymbols.contains(name)) {
     return mMinimalObjectSymbols[name];
-  } else {
-    return std::nullopt;
   }
+  return std::nullopt;
 }
 
 void
@@ -191,9 +189,8 @@ ObjectFile::SetCompileUnitData(const std::vector<sym::dw::UnitData *> &unit_data
   MDB_ASSERT(!unit_data.empty(), "Expected unit data to be non-empty");
   std::lock_guard lock(mUnitDataWriteLock);
   mCompileUnits.insert(mCompileUnits.begin(), unit_data.begin(), unit_data.end());
-  std::sort(mCompileUnits.begin(), mCompileUnits.end(), [](UnitData *a, UnitData *b) {
-    return a->SectionOffset() < b->SectionOffset();
-  });
+  std::ranges::sort(
+    mCompileUnits, [](UnitData *a, UnitData *b) { return a->SectionOffset() < b->SectionOffset(); });
 }
 
 std::span<sym::dw::UnitData *>
@@ -214,19 +211,18 @@ ObjectFile::GetCompileUnitFromOffset(u64 offset) noexcept
   if (it != std::end(mCompileUnits)) {
     MDB_ASSERT((*it)->SpansAcrossOffset(offset), "compilation unit does not span 0x{:x}", offset);
     return *it;
-  } else {
-    return nullptr;
   }
+  return nullptr;
 }
 
 std::optional<sym::dw::DieReference>
 ObjectFile::GetDebugInfoEntryReference(u64 offset) noexcept
 {
-  auto cu = GetCompileUnitFromOffset(offset);
+  sym::dw::UnitData *cu = GetCompileUnitFromOffset(offset);
   if (cu == nullptr) {
     return {};
   }
-  auto die = cu->GetDebugInfoEntry(offset);
+  const sym::dw::DieMetaData *die = cu->GetDebugInfoEntry(offset);
   if (die == nullptr) {
     return {};
   }
@@ -237,11 +233,11 @@ ObjectFile::GetDebugInfoEntryReference(u64 offset) noexcept
 sym::dw::DieReference
 ObjectFile::GetDieReference(u64 offset) noexcept
 {
-  auto cu = GetCompileUnitFromOffset(offset);
+  sym::dw::UnitData *cu = GetCompileUnitFromOffset(offset);
   if (cu == nullptr) {
     return sym::dw::DieReference{ nullptr, nullptr };
   }
-  auto die = cu->GetDebugInfoEntry(offset);
+  const sym::dw::DieMetaData *die = cu->GetDebugInfoEntry(offset);
   if (die == nullptr) {
     return sym::dw::DieReference{ nullptr, nullptr };
   }
@@ -263,9 +259,9 @@ ObjectFile::AddInitializedCompileUnits(std::span<sym::CompilationUnit *> newComp
     "ObjectFile::AddInitializedCompileUnits", "symbolication", PEARG("comp_units", newCompileUnits.size()));
   std::lock_guard lock(mCompileUnitWriteLock);
   mCompilationUnits.insert(mCompilationUnits.end(), newCompileUnits.begin(), newCompileUnits.end());
-  std::sort(mCompilationUnits.begin(), mCompilationUnits.end(), sym::CompilationUnit::Sorter());
+  std::ranges::sort(mCompilationUnits, sym::CompilationUnit::Sorter());
 
-  for (auto compileUnit : newCompileUnits) {
+  for (sym::CompilationUnit *compileUnit : newCompileUnits) {
     const auto sources = compileUnit->sources();
     std::unordered_set<sym::dw::SourceCodeFile *> added;
     for (const auto &[fileIndex, src] : sources) {
@@ -277,7 +273,7 @@ ObjectFile::AddInitializedCompileUnits(std::span<sym::CompilationUnit *> newComp
   }
 
   DBG({
-    if (!std::is_sorted(mCompilationUnits.begin(), mCompilationUnits.end(), sym::CompilationUnit::Sorter())) {
+    if (!std::ranges::is_sorted(mCompilationUnits, sym::CompilationUnit::Sorter())) {
       for (const auto cu : mCompilationUnits) {
         DBGLOG(core,
           "[cu dwarf offset={}]: start_pc = {}, end_pc={}",
@@ -292,9 +288,9 @@ ObjectFile::AddInitializedCompileUnits(std::span<sym::CompilationUnit *> newComp
 }
 
 void
-ObjectFile::AddTypeUnits(std::span<sym::dw::UnitData *> tus) noexcept
+ObjectFile::AddTypeUnits(std::span<sym::dw::UnitData *> typeUnits) noexcept
 {
-  for (const auto tu : tus) {
+  for (sym::dw::UnitData *tu : typeUnits) {
     MDB_ASSERT(tu->GetHeader().GetUnitType() == DwarfUnitType::DW_UT_type,
       "Expected DWARF Unit Type but got {}",
       to_str(tu->GetHeader().GetUnitType()));
@@ -770,8 +766,8 @@ ObjectFile::GetOrCreateObjectFile(const Path &path) noexcept
   std::vector<ElfSection> sectionData;
   sectionData.reserve(header->e_shnum);
 
-  const auto *sectionNamesOffsetHeader =
-    objfile->AlignedRequiredGetAtOffset<Elf64_Shdr>(header->e_shoff + (header->e_shstrndx * header->e_shentsize));
+  const auto *sectionNamesOffsetHeader = objfile->AlignedRequiredGetAtOffset<Elf64_Shdr>(
+    header->e_shoff + (static_cast<Elf64_Off>(header->e_shstrndx * header->e_shentsize)));
 
   u64 min = UINTMAX_MAX;
   u64 max = 0;
@@ -779,7 +775,7 @@ ObjectFile::GetOrCreateObjectFile(const Path &path) noexcept
   // good enough heuristic to determine mapped in ranges.
   for (auto i = 0; i < header->e_phnum; ++i) {
     auto *programHeader =
-      objfile->AlignedRequiredGetAtOffset<Elf64_Phdr>(header->e_phoff + header->e_phentsize * i);
+      objfile->AlignedRequiredGetAtOffset<Elf64_Phdr>(header->e_phoff + (header->e_phentsize * i));
     if (programHeader->p_type == PT_LOAD) {
       min = std::min(programHeader->p_vaddr, min);
       const auto end = u64{ programHeader->p_vaddr + programHeader->p_memsz };
@@ -1006,7 +1002,7 @@ SymbolFile::GetMinimalFunctionSymbol(std::string_view name) noexcept -> std::opt
 }
 
 auto
-SymbolFile::SearchMinimalSymbolFunctionInfo(AddrPtr pc) noexcept -> const MinSymbol *
+SymbolFile::SearchMinimalSymbolFunctionInfo(AddrPtr pc) const noexcept -> const MinSymbol *
 {
   return GetObjectFile()->SearchMinimalSymbolFunctionInfo(pc - *mBaseAddress);
 }
@@ -1024,7 +1020,7 @@ SymbolFile::GetObjectFilePath() const noexcept -> Path
 }
 
 auto
-SymbolFile::GetId() noexcept -> Pid
+SymbolFile::GetId() const noexcept -> Pid
 {
   return mProcessId;
 }

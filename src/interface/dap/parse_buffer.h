@@ -262,13 +262,13 @@ static constexpr std::array<std::pair<std::string_view, CommandType>, std::to_un
 struct ContentDescriptor
 {
   // The parsed payload length from the header
-  u64 payload_length;
+  u64 mPayloadLength;
   // offset to start of the header into the owning buffer
-  u64 packet_offset;
+  u64 mPacketOffset;
   // first byte of header
-  const char *header_begin;
+  const char *mHeaderBegin;
   // first byte of payload
-  const char *payload_begin;
+  const char *mPayloadBegin;
 
   std::string_view payload() const noexcept;
 };
@@ -279,9 +279,9 @@ struct ContentDescriptor
 // - `payload_begin` points to the first byte of the body in the buffer
 struct PartialContentDescriptor
 {
-  u64 payload_length;
-  u64 payload_missing;
-  const char *payload_begin;
+  u64 mPayloadLength;
+  u64 mPayloadMissing;
+  const char *mPayloadBegin;
 };
 
 // data that we couldn't parse "Content-Length" header from, which probably means
@@ -292,15 +292,15 @@ struct PartialContentDescriptor
 // the last item found in the buffer)
 struct RemainderData
 {
-  u64 length;
-  u64 offset;
+  u64 mLength;
+  u64 mOffset;
 };
 
 using ViewMatchResult = std::match_results<std::string_view::const_iterator>;
 using ContentParse = std::variant<ContentDescriptor, PartialContentDescriptor, RemainderData>;
 
 std::vector<ContentParse> ParseHeadersFromBuffer(
-  const std::string_view buffer_view, bool *no_partials = nullptr) noexcept;
+  std::string_view bufferView, bool *allMessagesOk = nullptr) noexcept;
 
 void setup_logging(std::fstream &logger);
 } // namespace mdb::ui::dap

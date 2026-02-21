@@ -30,6 +30,7 @@ ParsedAuxiliaryVectorData(const Auxv &aux, ParseAuxiliaryOptions options) noexce
   ParsedAuxiliaryVector result;
   ParseAuxiliaryOptions found;
   for (const auto [id, value] : aux.mContents) {
+    // NOLINTNEXTLINE
     switch (id) {
     case AT_PHDR:
       result.mProgramHeaderPointer = value;
@@ -70,6 +71,7 @@ ParsedAuxiliaryVectorData(const Auxv &aux, ParseAuxiliaryOptions options) noexce
 } // namespace mdb
 
 namespace mdb::tc {
+using std::move;
 
 auto
 CreateSymbolFileIfNew(SupervisorState &supervisorState, const Path &path, AddrPtr baseAddress) noexcept
@@ -174,7 +176,7 @@ void
 SupervisorState::InstallDynamicLoaderBreakpoints(AddrPtr mappedDynamicSectionAddress) noexcept
 {
   MDB_ASSERT(mMainExecutable != nullptr, "No main executable for this target");
-  const auto mainExecutableElf = mMainExecutable->GetObjectFile()->GetElf();
+  const Elf *mainExecutableElf = mMainExecutable->GetObjectFile()->GetElf();
   const Path interpreterPath = InterpreterPath(mainExecutableElf, mainExecutableElf->GetSection(".interp"));
   const std::shared_ptr tempObjectFile = ObjectFile::GetOrCreateObjectFile(interpreterPath);
   MDB_ASSERT(tempObjectFile != nullptr, "Failed to mmap the loader binary");
@@ -302,7 +304,7 @@ SupervisorState::GetTaskByTid(pid_t pid) noexcept
     return nullptr;
   };
 
-  if (auto task = findTask(mThreads)) {
+  if (TaskInfo *task = findTask(mThreads)) {
     return task;
   }
 
@@ -318,13 +320,7 @@ SupervisorState::HasTask(Tid tid) noexcept
     }
   }
 
-  for (const auto &taskEntry : mExitedThreads) {
-    if (taskEntry.mTid == tid) {
-      return true;
-    }
-  }
-
-  return false;
+  return std::ranges::any_of(mExitedThreads, [tid](auto &entry) { return entry.mTid == tid; });
 }
 
 bool
@@ -505,7 +501,7 @@ SupervisorState::GetOrCreateBreakpointLocation(AddrPtr addr) noexcept
 
 mdb::Expected<Ref<BreakpointLocation>, BreakpointError>
 SupervisorState::GetOrCreateBreakpointLocation(
-  AddrPtr addr, sym::dw::SourceCodeFile &sourceFile, const sym::dw::LineTableEntry &lte) noexcept
+  AddrPtr addr, sym::dw::SourceCodeFile &sourceCodeFile, const sym::dw::LineTableEntry &lte) noexcept
 {
   auto loc = mUserBreakpoints.GetLocationAt(addr);
   if (loc) {
@@ -519,7 +515,7 @@ SupervisorState::GetOrCreateBreakpointLocation(
   auto original_byte = res.take_value();
   return BreakpointLocation::CreateLocationWithSource(addr,
     original_byte,
-    std::make_unique<LocationSourceInfo>(sourceFile.mFullPath.StringView(), lte.line, u32{ lte.column }));
+    std::make_unique<LocationSourceInfo>(sourceCodeFile.mFullPath.StringView(), lte.line, u32{ lte.column }));
 }
 
 mdb::Expected<Ref<BreakpointLocation>, BreakpointError>
@@ -538,9 +534,8 @@ SupervisorState::GetOrCreateBreakpointLocationWithSourceLoc(
   if (sourceLocInfo) {
     return BreakpointLocation::CreateLocationWithSource(
       addr, original_byte, std::make_unique<LocationSourceInfo>(std::move(sourceLocInfo.value())));
-  } else {
-    return BreakpointLocation::CreateLocation(addr, original_byte);
   }
+  return BreakpointLocation::CreateLocation(addr, original_byte);
 }
 
 bool
@@ -548,8 +543,8 @@ SupervisorState::CheckBreakpointLocationsForSymbolFile(
   const SymbolFile &symbolFile, UserBreakpoint &user, std::vector<Ref<BreakpointLocation>> &locs) noexcept
 {
   const auto sz = locs.size();
-  if (auto specPtr = user.UserProvidedSpec(); specPtr != nullptr) {
-    auto objfile = symbolFile.GetObjectFile();
+  if (BreakpointSpecification *specPtr = user.UserProvidedSpec(); specPtr != nullptr) {
+    ObjectFile *objfile = symbolFile.GetObjectFile();
     switch (specPtr->mKind) {
     case DapBreakpointType::source: {
       const auto &spec = specPtr->uSource;
@@ -575,16 +570,16 @@ SupervisorState::CheckBreakpointLocationsForSymbolFile(
     case DapBreakpointType::function: {
       auto result = symbolFile.LookupFunctionBreakpointBySpec(*specPtr);
 
-      if (auto it = FindIf(result, [](const auto &it) { return it.loc_src_info.has_value(); });
+      if (auto it = FindIf(result, [](const BreakpointLookup &it) { return it.mLocationSourceInfo.has_value(); });
         it != end(result)) {
         if (auto res =
-              GetOrCreateBreakpointLocationWithSourceLoc(it->address, std::move(it->loc_src_info.value()));
+              GetOrCreateBreakpointLocationWithSourceLoc(it->mAddress, std::move(it->mLocationSourceInfo));
           res.is_expected()) {
           locs.push_back(res.take_value());
         }
       } else {
         for (auto &&lookup : result) {
-          if (auto res = GetOrCreateBreakpointLocation(lookup.address); res.is_expected()) {
+          if (auto res = GetOrCreateBreakpointLocation(lookup.mAddress); res.is_expected()) {
             locs.push_back(res.take_value());
           }
         }
@@ -592,9 +587,9 @@ SupervisorState::CheckBreakpointLocationsForSymbolFile(
     } break;
     case DapBreakpointType::instruction: {
       const auto &spec = *specPtr->uInstruction;
-      auto addr_opt = ToAddress(spec.mInstructionReference);
-      MDB_ASSERT(addr_opt.has_value(), "Failed to convert instructionReference to valid address");
-      const auto addr = addr_opt.value();
+      auto addressResult = ToAddress(spec.mInstructionReference);
+      MDB_ASSERT(addressResult.has_value(), "Failed to convert instructionReference to valid address");
+      const auto addr = addressResult.value();
       if (symbolFile.ContainsProgramCounter(addr)) {
         if (auto res = GetOrCreateBreakpointLocation(addr); res.is_expected()) {
           locs.push_back(res.take_value());
@@ -648,7 +643,7 @@ SupervisorState::DoBreakpointsUpdate(std::span<std::shared_ptr<SymbolFile>> newS
 
   // Do update for "source breakpoints", breakpoints set via a source spec
   for (auto &&sym : newSymbolFiles) {
-    auto obj = sym->GetObjectFile();
+    ObjectFile *obj = sym->GetObjectFile();
     for (const auto &source_file : mUserBreakpoints.GetSourceFilesWithBreakpointSpecs()) {
       auto &file_bp_map = mUserBreakpoints.GetBreakpointsFromSourceFile(source_file);
       for (auto &sourceCodeFile : obj->GetSourceCodeFiles(source_file)) {
@@ -702,7 +697,7 @@ SupervisorState::DoBreakpointsUpdate(std::span<std::shared_ptr<SymbolFile>> newS
       auto result = sym->LookupFunctionBreakpointBySpec(fn);
       for (auto &&lookup : result) {
         auto user = mUserBreakpoints.CreateBreakpointLocationUser<Breakpoint>(*this,
-          GetOrCreateBreakpointLocationWithSourceLoc(lookup.address, std::move(lookup.loc_src_info)),
+          GetOrCreateBreakpointLocationWithSourceLoc(lookup.mAddress, std::move(lookup.mLocationSourceInfo)),
           mTaskLeader,
           LocationUserKind::Function,
           fn.Clone());
@@ -723,7 +718,7 @@ SupervisorState::UpdateSourceBreakpoints(const std::filesystem::path &sourceFile
   Set<BreakpointSpecification> not_set{ add.begin(), add.end() };
 
   for (const auto &symbol_file : mSymbolFiles) {
-    auto obj = symbol_file->GetObjectFile();
+    ObjectFile *obj = symbol_file->GetObjectFile();
     for (auto &sourceCodeFile : obj->GetSourceCodeFiles(sourceFilePath.c_str())) {
       // TODO(simon): use arena allocator for foundEntries
       std::vector<sym::dw::LineTableEntry> foundEntries;
@@ -850,9 +845,9 @@ SupervisorState::SetInstructionBreakpoints(const Set<BreakpointSpecification> &b
   for (const auto &bp : add) {
     auto addr = ToAddress(bp.uInstruction->mInstructionReference).value();
     bool was_not_set = true;
-    if (auto symbolFile = FindObjectByPc(addr); symbolFile) {
+    if (SymbolFile *symbolFile = FindObjectByPc(addr); symbolFile) {
       auto cus = symbolFile->GetCompilationUnits(addr);
-      for (auto cu : cus) {
+      for (sym::CompilationUnit *cu : cus) {
         auto [src, lte] = cu->GetLineTableEntry(symbolFile->UnrelocateAddress(addr));
         if (src && lte) {
           const auto user = mUserBreakpoints.CreateBreakpointLocationUser<Breakpoint>(*this,
@@ -915,7 +910,7 @@ SupervisorState::SetFunctionBreakpoints(const Set<BreakpointSpecification> &brea
       auto result = sym->LookupFunctionBreakpointBySpec(fn.mSpec);
       for (auto &&lookup : result) {
         auto user = mUserBreakpoints.CreateBreakpointLocationUser<Breakpoint>(*this,
-          GetOrCreateBreakpointLocationWithSourceLoc(lookup.address, std::move(lookup.loc_src_info)),
+          GetOrCreateBreakpointLocationWithSourceLoc(lookup.mAddress, std::move(lookup.mLocationSourceInfo)),
           mTaskLeader,
           LocationUserKind::Function,
           fn.mSpec.Clone());
@@ -969,15 +964,15 @@ sym::UnwinderSymbolFilePair
 SupervisorState::GetUnwinderUsingPc(AddrPtr pc) noexcept
 {
   for (auto &symbolFile : mSymbolFiles) {
-    const auto u = symbolFile->GetObjectFile()->GetUnwinder();
+    sym::Unwinder *u = symbolFile->GetObjectFile()->GetUnwinder();
     if (pc > symbolFile->mBaseAddress) {
       const auto unrelocated = symbolFile->UnrelocateAddress(pc);
       if (u->mAddressRange.Contains(unrelocated)) {
-        return sym::UnwinderSymbolFilePair{ u, symbolFile.get() };
+        return sym::UnwinderSymbolFilePair{ .mUnwinder = u, .mSymbolFile = symbolFile.get() };
       }
     }
   }
-  return sym::UnwinderSymbolFilePair{ mNullUnwinder, nullptr };
+  return sym::UnwinderSymbolFilePair{ .mUnwinder = mNullUnwinder, .mSymbolFile = nullptr };
 }
 
 void
@@ -1012,12 +1007,7 @@ SupervisorState::OnSharedObjectEvent() noexcept
 bool
 SupervisorState::IsAllStopped() const noexcept
 {
-  for (const auto &t : mThreads) {
-    if (!t.mTask->IsStopped()) {
-      return false;
-    }
-  }
-  return true;
+  return std::ranges::all_of(mThreads, [](auto &t) { return t.mTask->IsStopped(); });
 }
 
 void
@@ -1168,8 +1158,8 @@ SupervisorState::BuildCallFrameStack(TaskInfo &task, const CallStackRequest &req
     if (symbol) {
       callStack.PushFrame(obj, task, depth, id, i.AsVoid(), symbol);
     } else {
-      auto obj = FindObjectByPc(framePc);
-      auto minimalSymbols = obj->SearchMinimalSymbolFunctionInfo(framePc);
+      SymbolFile *obj = FindObjectByPc(framePc);
+      const MinSymbol *minimalSymbols = obj->SearchMinimalSymbolFunctionInfo(framePc);
       if (minimalSymbols) {
         callStack.PushFrame(obj, task, depth, id, i.AsVoid(), minimalSymbols);
       } else {
@@ -1194,30 +1184,29 @@ sym::Frame
 SupervisorState::GetCurrentFrame(TaskInfo &task) noexcept
 {
   const auto pc = CacheAndGetPcFor(task);
-  const auto obj = FindObjectByPc(pc);
+  SymbolFile *obj = FindObjectByPc(pc);
   if (obj == nullptr) {
     return sym::Frame{ nullptr, task, 0, 0, pc, nullptr };
   }
-  auto matchingCompilationUnits = obj->GetUnitDataFromProgramCounter(pc);
+  std::vector<sym::CompilationUnit *> matchingCompilationUnits = obj->GetUnitDataFromProgramCounter(pc);
 
-  for (auto src : matchingCompilationUnits) {
-    if (auto fn = src->GetFunctionSymbolByProgramCounter(obj->UnrelocateAddress(pc)); fn) {
+  for (sym::CompilationUnit *src : matchingCompilationUnits) {
+    if (sym::FunctionSymbol *fn = src->GetFunctionSymbolByProgramCounter(obj->UnrelocateAddress(pc)); fn) {
       return sym::Frame{ obj, task, 0, 0, pc, fn };
     }
   }
 
-  if (auto min_sym = obj->SearchMinimalSymbolFunctionInfo(pc); min_sym != nullptr) {
-    return sym::Frame{ obj, task, 0, 0, pc, min_sym };
-  } else {
-    return sym::Frame{ obj, task, 0, 0, pc, nullptr };
+  if (const MinSymbol *minimalSymbol = obj->SearchMinimalSymbolFunctionInfo(pc); minimalSymbol != nullptr) {
+    return sym::Frame{ obj, task, 0, 0, pc, minimalSymbol };
   }
+  return sym::Frame{ obj, task, 0, 0, pc, nullptr };
 }
 
 std::optional<std::pair<sym::FunctionSymbol *, NonNullPtr<SymbolFile>>>
 SupervisorState::FindFunctionByPc(AddrPtr addr) noexcept
 {
   PROFILE_BEGIN("SupervisorState::FindFunctionByPc", "supervisor");
-  const auto symbolFile = FindObjectByPc(addr);
+  SymbolFile *symbolFile = FindObjectByPc(addr);
   if (symbolFile == nullptr) {
     return std::nullopt;
   }
@@ -1240,9 +1229,10 @@ SupervisorState::FindFunctionByPc(AddrPtr addr) noexcept
 
   alreadyParse.reserve(matchingCompilationUnits.size());
   sortedCompUnits.reserve(matchingCompilationUnits.size());
-  for (auto src : matchingCompilationUnits) {
+  for (sym::CompilationUnit *src : matchingCompilationUnits) {
     if (src->IsFunctionSymbolsResolved()) {
-      if (auto fn = src->GetFunctionSymbolByProgramCounter(symbolFile->UnrelocateAddress(addr)); fn) {
+      if (sym::FunctionSymbol *fn = src->GetFunctionSymbolByProgramCounter(symbolFile->UnrelocateAddress(addr));
+        fn) {
         foundFn = fn;
         return std::make_pair(fn, NonNull(*symbolFile));
       }
@@ -1255,8 +1245,8 @@ SupervisorState::FindFunctionByPc(AddrPtr addr) noexcept
     return a->GetDwarfUnitData()->UnitSize() > b->GetDwarfUnitData()->UnitSize();
   });
 
-  for (const auto cu : sortedCompUnits) {
-    if (auto fn = cu->GetFunctionSymbolByProgramCounter(symbolFile->UnrelocateAddress(addr)); fn) {
+  for (sym::CompilationUnit *cu : sortedCompUnits) {
+    if (sym::FunctionSymbol *fn = cu->GetFunctionSymbolByProgramCounter(symbolFile->UnrelocateAddress(addr)); fn) {
       foundFn = fn;
       return std::make_pair(fn, NonNull(*symbolFile));
     }
@@ -1274,7 +1264,7 @@ SupervisorState::PostExec(const std::string &exe, bool stopAtEntry, bool install
   }
   mSymbolFiles.clear();
 
-  auto t = GetTaskByTid(TaskLeaderTid());
+  TaskInfo *t = GetTaskByTid(TaskLeaderTid());
   CacheRegistersFor(*t);
   mUserBreakpoints.OnExec();
 
@@ -1283,7 +1273,7 @@ SupervisorState::PostExec(const std::string &exe, bool stopAtEntry, bool install
 
   std::vector<u8> programHeaderContents{};
   programHeaderContents.resize(
-    mParsedAuxiliaryVector.mProgramHeaderEntrySize * mParsedAuxiliaryVector.mProgramHeaderCount, 0);
+    u64{ mParsedAuxiliaryVector.mProgramHeaderEntrySize } * u64{ mParsedAuxiliaryVector.mProgramHeaderCount }, 0);
   const auto readResult = DoReadBytes(
     mParsedAuxiliaryVector.mProgramHeaderPointer, programHeaderContents.size(), programHeaderContents.data());
   MDB_ASSERT(readResult.WasSuccessful(), "Failed to read program headers");
@@ -1291,7 +1281,7 @@ SupervisorState::PostExec(const std::string &exe, bool stopAtEntry, bool install
   Elf64_Phdr *cast = (Elf64_Phdr *)programHeaderContents.data();
   AddrPtr baseAddress = nullptr;
   const Elf64_Phdr *pt_dynamic = nullptr;
-  for (auto i = 0u; i < mParsedAuxiliaryVector.mProgramHeaderCount; ++i) {
+  for (auto i = 0U; i < mParsedAuxiliaryVector.mProgramHeaderCount; ++i) {
     if ((cast + i)->p_type == PT_PHDR) {
       baseAddress = mParsedAuxiliaryVector.mProgramHeaderPointer - (cast + i)->p_offset;
       DBGLOG(core, "Found base address in program header data in loaded binary: {}", baseAddress);
@@ -1324,7 +1314,7 @@ SupervisorState::PostExec(const std::string &exe, bool stopAtEntry, bool install
     const std::vector result = mMainExecutable->LookupFunctionBreakpointBySpec(mainSpec);
     for (const auto &lookup : result) {
       auto user = mUserBreakpoints.CreateBreakpointLocationUser<Breakpoint>(*this,
-        GetOrCreateBreakpointLocation(lookup.address),
+        GetOrCreateBreakpointLocation(lookup.mAddress),
         mTaskLeader,
         LocationUserKind::Address,
         mainSpec.Clone());
@@ -1337,11 +1327,12 @@ SupervisorState::SafeRead(AddrPtr addr, u64 bytes) noexcept
 {
   auto buffer = mdb::ByteBuffer::create(bytes);
 
-  auto totalRead = 0ull;
+  auto totalRead = 0UL;
   while (totalRead < bytes) {
     auto res = DoReadBytes(addr, bytes - totalRead, buffer->next());
     if (!res.WasSuccessful()) {
-      return mdb::unexpected(NonFullRead{ std::move(buffer), static_cast<u32>(bytes - totalRead), errno });
+      return mdb::unexpected(NonFullRead{
+        .mBytes = std::move(buffer), .mUnreadBytes = static_cast<u32>(bytes - totalRead), .mErrorNumber = errno });
     }
     buffer->wrote_bytes(res.uBytesRead);
     totalRead += res.uBytesRead;
@@ -1358,7 +1349,8 @@ SupervisorState::SafeRead(std::pmr::memory_resource *allocator, AddrPtr addr, u6
   while (totalRead < bytes) {
     auto res = DoReadBytes(addr, bytes - totalRead, buffer->next());
     if (!res.WasSuccessful()) {
-      return mdb::unexpected(NonFullRead{ std::move(buffer), static_cast<u32>(bytes - totalRead), errno });
+      return mdb::unexpected(NonFullRead{
+        .mBytes = std::move(buffer), .mUnreadBytes = static_cast<u32>(bytes - totalRead), .mErrorNumber = errno });
     }
     buffer->wrote_bytes(res.uBytesRead);
     totalRead += res.uBytesRead;
@@ -1376,7 +1368,7 @@ SupervisorState::ReadNullTerminatedString(TraceePointer<char> address) noexcept
   u8 buf[256];
   auto res = DoReadBytes(address.As<void>(), std::size(buf), buf);
   while (res.WasSuccessful()) {
-    for (auto i = 0u; i < res.uBytesRead; ++i) {
+    for (size_t i = 0; i < res.uBytesRead; ++i) {
       if (buf[i] == 0) {
         return result;
       }
@@ -1396,10 +1388,10 @@ SupervisorState::ReadToVector(AddrPtr addr, u64 bytes, std::pmr::memory_resource
 {
   auto data = mdb::LeakVector<u8>::Create(bytes, resource);
 
-  auto totalRead = 0ull;
+  size_t totalRead = 0;
   while (totalRead < bytes) {
-    const auto read_address = addr + totalRead;
-    const auto result = DoReadBytes(read_address, bytes - totalRead, data->data_ptr() + totalRead);
+    const auto readAddress = addr + totalRead;
+    const auto result = DoReadBytes(readAddress, bytes - totalRead, data->data_ptr() + totalRead);
     if (!result.WasSuccessful()) {
       PANIC(std::format("Failed to proc_fs read from {}", addr));
     }
@@ -1422,7 +1414,7 @@ SupervisorState::InstallSoftwareBreakpointLocation(Tid tid, AddrPtr addr) noexce
   const auto res = InstallBreakpoint(tid, addr);
   if (!res.is_ok()) {
     DBGLOG(core, "[{}:bkpt:loc]: error while installing location: {}", mTaskLeader, addr);
-    return mdb::unexpected(BreakpointError{ MemoryError{ errno, addr } });
+    return mdb::unexpected(BreakpointError{ MemoryError{ .mErrorNumber = errno, .mRequestedAddress = addr } });
   }
   DBGLOG(core,
     "[{}:bkpt:loc]: installing location: {}, original byte: 0x{:x}",
@@ -1444,14 +1436,14 @@ SupervisorState::ShutDownDebugAdapterClient() noexcept
 }
 
 SupervisorState::LinkerReadResult
-SupervisorState::ReadLinkerInformation(const r_debug &dbg, std::vector<ObjectFileDescriptor> &objects) noexcept
+SupervisorState::ReadLinkerInformation(const r_debug &debug, std::vector<ObjectFileDescriptor> &objects) noexcept
 {
-  if (dbg.r_state != dbg.RT_CONSISTENT) {
+  if (debug.r_state != debug.RT_CONSISTENT) {
     DBGLOG(core, "Debug state not consistent: no information about obj files read");
     return LinkerReadResult::InconsistentState;
   }
   DBGLOG(core, "Debug state is consistent; proceed to read dbg state.");
-  auto linkmap = TPtr<link_map>{ dbg.r_map };
+  auto linkmap = TPtr<link_map>{ debug.r_map };
   while (linkmap != nullptr) {
     auto map_res = SafeReadType(linkmap);
     if (!map_res.has_value()) {
@@ -1489,10 +1481,10 @@ SupervisorState::CreateStoppedEvent(ui::dap::StoppedReason reason,
   Tid tid,
   std::string_view text,
   bool allStopped,
-  std::vector<int> breakpointsHit = {}) noexcept
+  std::vector<int> breakpointIds = {}) noexcept
 {
   return new ui::dap::StoppedEvent{
-    mTaskLeader, reason, description, tid, std::move(breakpointsHit), text, allStopped
+    mTaskLeader, reason, description, tid, std::move(breakpointIds), text, allStopped
   };
 }
 

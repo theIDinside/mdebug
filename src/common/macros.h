@@ -112,6 +112,7 @@ FromInt(int value) noexcept
 #define PREDEFINED_ENUM_TYPE_METADATA(ENUM_TYPE, FOR_EACH, EACH_FN)                                               \
   namespace detail##ENUM_TYPE                                                                                     \
   {                                                                                                               \
+    /* NOLINTNEXTLINE - We can't wrap this in parenthesis. */                                                     \
     using enum ENUM_TYPE;                                                                                         \
     static constexpr auto ENUM_TYPE##Ids = std::to_array<ENUM_TYPE>({ FOR_EACH(DEFAULT_ENUM) });                  \
     static constexpr auto ENUM_TYPE##Names = std::to_array<std::string_view>({ FOR_EACH(STRINGIFY_VAL) });        \
@@ -121,6 +122,7 @@ FromInt(int value) noexcept
     static consteval auto                                                                                         \
     EnumBaseOffset() noexcept                                                                                     \
     {                                                                                                             \
+      /* NOLINTNEXTLINE - We can't wrap this in parenthesis. */                                                   \
       using enum ENUM_TYPE;                                                                                       \
       return std::to_underlying(detail##ENUM_TYPE::ENUM_TYPE##Ids[0]);                                            \
     }                                                                                                             \
@@ -134,6 +136,7 @@ FromInt(int value) noexcept
     static constexpr std::optional<ENUM_TYPE>                                                                     \
     FromInt(auto value) noexcept                                                                                  \
     {                                                                                                             \
+      /* NOLINTNEXTLINE - We can't wrap this in parenthesis. */                                                   \
       using enum ENUM_TYPE;                                                                                       \
       if (value < std::to_underlying(detail##ENUM_TYPE::ENUM_TYPE##Ids.front()) ||                                \
           value > std::to_underlying(detail##ENUM_TYPE::ENUM_TYPE##Ids.back())) {                                 \

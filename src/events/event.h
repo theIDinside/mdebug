@@ -202,8 +202,8 @@ template <> class Publisher<void>
     SubscriberAction fn;
   };
 
-  std::vector<Subscriber> subscribers{};
-  std::vector<SubscriberAction> sub_once{};
+  std::vector<Subscriber> subscribers;
+  std::vector<SubscriberAction> sub_once;
 
 public:
   template <typename Fn>
@@ -212,7 +212,7 @@ public:
   {
     MDB_ASSERT(mdb::none_of(subscribers, [&identity](auto &c) { return identity == c.identity; }),
       "Expected Identity to be a unique value");
-    subscribers.emplace_back(identity, std::move(fn));
+    subscribers.emplace_back(identity, std::forward<Fn>(fn));
   }
 
   void
@@ -228,7 +228,7 @@ public:
   void
   Once(Fn &&fn) noexcept
   {
-    sub_once.push_back(std::move(fn));
+    sub_once.push_back(std::forward<Fn>(fn));
   }
 
   void
