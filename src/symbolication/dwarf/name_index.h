@@ -71,7 +71,9 @@ class NameIndex
     void ConvertToCollisionVariant(DieNameReference &elem, u64 die_index, UnitData *cu) noexcept;
   };
 
-  std::vector<std::unique_ptr<NameIndexShard>> mNameIndexShards{};
+  // Shards, when created, live as long as the ObjectFile they're associated with. They are therefore completely
+  // safe to use within the context of an ObjectFile as raw pointers
+  std::vector<std::unique_ptr<NameIndexShard>> mNameIndexShards;
 
 public:
   using NameDieTuple = std::tuple<const char *, u64, UnitData *>;
@@ -113,23 +115,7 @@ struct ObjectFileNameIndex
     }
   }
 
-  template <typename Fn>
-  void
-  ForEachFn(std::string_view name, Fn &&f) const noexcept
-  {
-    if (const auto ff_res = mFreeFunctions.Search(name); ff_res) {
-      auto &res = ff_res.value();
-      for (auto &item : res) {
-        f(item);
-      }
-    }
-
-    if (const auto mf_res = mMethods.Search(name); mf_res) {
-      auto &res = mf_res.value();
-      for (auto &item : res) {
-        f(item);
-      }
-    }
-  }
+  void ForEachFn(
+    std::string_view name, const std::function<void(const sym::dw::DieNameReference &ref)> &f) const noexcept;
 };
 } // namespace mdb::sym::dw

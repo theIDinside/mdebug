@@ -18,6 +18,8 @@ struct StackValue
   JSContext *mContext;
   JSValue mValue;
 
+  StackValue() : mContext(nullptr), mValue() {}
+
   StackValue(JSContext *cx, JSValue value) noexcept;
   StackValue(StackValue &&) noexcept;
   StackValue &operator=(StackValue &&) noexcept;

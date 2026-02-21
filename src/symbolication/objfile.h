@@ -203,7 +203,9 @@ public:
   /**
    * Search the string tables of a object file, using regex pattern `regex_pattern`
    */
-  auto SearchDebugSymbolStringTable(const std::string &regex) const noexcept -> std::vector<std::string>;
+  auto SearchDebugSymbolStringTable(const std::string &regexString) const noexcept -> std::vector<std::string>;
+  auto SearchDebugSymbolStringTableParallelized(const std::string &regexString) const noexcept
+    -> std::vector<std::string>;
 
   auto ForEachTypeMatching(
     std::string_view pattern, bool exactPattern, const std::function<void(sym::Type *type)> &onEachType) -> void;

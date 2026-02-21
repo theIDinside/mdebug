@@ -1,8 +1,6 @@
 /** LICENSE TEMPLATE */
 #include "index_die_names.h"
-#include "utils/logger.h"
-// system
-#include <algorithm>
+
 // mdb
 #include <symbolication/cu_symbol_info.h>
 #include <symbolication/dwarf/debug_info_reader.h>
@@ -15,8 +13,12 @@
 #include <symbolication/elf.h>
 #include <symbolication/objfile.h>
 #include <utils/interval_map.h>
+#include <utils/logger.h>
 #include <utils/scope_defer.h>
 #include <utils/thread_pool.h>
+
+// std
+#include <algorithm>
 
 namespace mdb::sym::dw {
 
@@ -25,7 +27,7 @@ IndexingTask::IndexingTask(ObjectFile *objectFile, std::span<UnitData *> compUni
 {
 }
 
-/*static*/ std::vector<IndexingTask *>
+/*static*/ std::vector<std::shared_ptr<StandardTask>>
 IndexingTask::CreateIndexingJobs(ObjectFile *obj, std::pmr::memory_resource *taskGroupAllocator)
 {
   std::pmr::vector<std::pmr::vector<sym::dw::UnitData *>> works{ taskGroupAllocator };
@@ -33,10 +35,9 @@ IndexingTask::CreateIndexingJobs(ObjectFile *obj, std::pmr::memory_resource *tas
   std::pmr::vector<sym::dw::UnitData *> sortedBySize{ taskGroupAllocator };
   mdb::CopyTo(obj->GetAllCompileUnits(), sortedBySize);
 
-  std::sort(
-    sortedBySize.begin(), sortedBySize.end(), [](auto a, auto b) { return a->UnitSize() > b->UnitSize(); });
+  std::ranges::sort(sortedBySize, [](auto a, auto b) { return a->UnitSize() > b->UnitSize(); });
 
-  std::vector<IndexingTask *> tasks;
+  std::vector<std::shared_ptr<StandardTask>> tasks;
   std::vector<u64> taskSize;
 
   const auto workerCount = mdb::ThreadPool::GetGlobalPool()->WorkerCount();
@@ -44,20 +45,20 @@ IndexingTask::CreateIndexingJobs(ObjectFile *obj, std::pmr::memory_resource *tas
   tasks.reserve(workerCount);
   taskSize.resize(workerCount, 0);
 
-  for (auto unit : sortedBySize) {
+  for (UnitData *unit : sortedBySize) {
     // Find the subgroup with the smallest current total
-    const u64 minIndex = std::distance(taskSize.begin(), std::min_element(taskSize.begin(), taskSize.end()));
+    const u64 minIndex = std::distance(taskSize.begin(), std::ranges::min_element(taskSize));
 
     // Assign the number to this subgroup
     works[minIndex].push_back(unit);
     taskSize[minIndex] += unit->UnitSize();
   }
 
-  auto acc = 0u;
+  auto acc = 0U;
   for (auto &w : works) {
     if (!w.empty()) {
       acc += w.size();
-      tasks.push_back(new IndexingTask{ obj, w });
+      tasks.emplace_back(std::make_shared<IndexingTask>(obj, w));
     }
   }
 
@@ -70,7 +71,7 @@ static bool
 IsMethod(UnitData *compilationUnit, const DieMetaData &die)
 {
   DieReference ref{ compilationUnit, &die };
-  auto objectFile = compilationUnit->GetObjectFile();
+  ObjectFile *objectFile = compilationUnit->GetObjectFile();
   while (ref.IsValid()) {
     const auto &abbreviations = ref.GetAbbreviation();
     auto reader = ref.GetReader();
@@ -97,7 +98,7 @@ IsMethod(UnitData *compilationUnit, const DieMetaData &die)
     if (consideredComplete) {
       switch (ref.GetDie()->GetParent()->mTag) {
       case DwarfTag::DW_TAG_class_type:
-        return true;
+        [[fallthrough]];
       case DwarfTag::DW_TAG_structure_type:
         return true;
       default:
@@ -110,14 +111,16 @@ IsMethod(UnitData *compilationUnit, const DieMetaData &die)
 }
 
 void
-IndexingTask::ExecuteTask(std::pmr::memory_resource *) noexcept
+IndexingTask::ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcept
 {
+  // TODO: Get around to removing this some time?
+  (void)temporaryAllocator;
 
   using NameSet = std::vector<NameIndex::NameDieTuple>;
   using NameTypeSet = std::vector<NameIndex::NameTypeDieTuple>;
 
-  auto sz = 0ul;
-  for (const auto unit : mCompUnitsToIndex) {
+  auto sz = 0UL;
+  for (const UnitData *unit : mCompUnitsToIndex) {
     sz += unit->GetHeader().CompilationUnitSize();
   }
 
@@ -145,12 +148,12 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *) noexcept
       comp_unit->ClearLoadedCache();
     }
 
-    for (auto cu : followedReferences) {
+    for (UnitData *cu : followedReferences) {
       cu->ClearLoadedCache();
     }
   } };
 
-  for (auto compileUnit : mCompUnitsToIndex) {
+  for (UnitData *compileUnit : mCompUnitsToIndex) {
     PROFILE_SCOPE_ARGS("Index Compilation Unit", "indexing", PEARG("cu", compileUnit->SectionOffset()));
     std::vector<i64> implicit_consts;
     const auto &dies = compileUnit->GetDies();
@@ -247,7 +250,7 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *) noexcept
             // We're doing name indexing.. we only care to find the name of referenced DIE, really.
             auto ref = ReadAttributeValue(reader, value, abb.mImplicitConsts).AsUnsignedValue();
             while (!name) {
-              auto refUnit = mObjectFile->GetCompileUnitFromOffset(ref);
+              UnitData *refUnit = mObjectFile->GetCompileUnitFromOffset(ref);
               UnitReader innerReader{ refUnit, ref };
               const auto [abbr_code, uleb_sz] = innerReader.DecodeULEB128();
               const auto &remoteAbbrev = refUnit->GetAbbreviation(abbr_code);
@@ -353,7 +356,7 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *) noexcept
     }
   }
 
-  auto idx = mObjectFile->GetNameIndex();
+  ObjectFileNameIndex *idx = mObjectFile->GetNameIndex();
   idx->mNamespaces.Merge(namespaces);
   idx->mFreeFunctions.Merge(freeFunctions);
   idx->mGlobalVariables.Merge(globalVariables);
@@ -366,9 +369,9 @@ IndexingTask::ExecuteTask(std::pmr::memory_resource *) noexcept
 }
 
 sym::PartialCompilationUnitSymbolInfo
-IndexingTask::InitPartialCompilationUnit(UnitData *partial_cu, const DieMetaData &) noexcept
+IndexingTask::InitPartialCompilationUnit(UnitData *partialCompilationUnit, const DieMetaData &) noexcept
 {
   // TODO("IndexingTask::initialize_partial_compilation_unit not yet implemented");
-  return sym::PartialCompilationUnitSymbolInfo{ partial_cu };
+  return sym::PartialCompilationUnitSymbolInfo{ partialCompilationUnit };
 }
 }; // namespace mdb::sym::dw

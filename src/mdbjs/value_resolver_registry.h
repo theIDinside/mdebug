@@ -25,13 +25,14 @@ namespace mdb::js {
 
 struct Resolver final : public sym::IValueContentsResolver
 {
+  std::string mObjectFileName;
   std::string mResolverName;
   std::string mResolverPattern;
 
   JSValue mResolverFn;
   JSContext *mContext;
 
-  Resolver(JSContext *cx, std::string name, std::string pattern, JSValue function);
+  Resolver(JSContext *cx, std::string objectFileName, std::string name, std::string pattern, JSValue function);
   ~Resolver();
 
   std::vector<Ref<sym::Value>> Resolve(Ref<sym::Value> baseValue, u32 offset, u32 count) const;
@@ -60,7 +61,10 @@ class ResolverRegistry
 public:
   static ResolverRegistry *Init(JSContext *ctx);
   Resolver *GetResolver(sym::Type *type);
-  void RegisterResolver(std::string resolverName, std::string resolverPattern, JSValue resolverFn);
+  void RegisterResolver(std::string_view fileName,
+    std::string_view resolverName,
+    std::string_view resolverPattern,
+    JSValue resolverFn);
   void OnNewSymbolFile(SymbolFile *symbolFile);
 };
 

@@ -12,37 +12,32 @@ ThreadPool::GetGlobalPool() noexcept
 }
 
 void
-ThreadPool::PostTask(Task *task) noexcept
+ThreadPool::PostTask(std::shared_ptr<TaskBase> task) noexcept
 {
   std::lock_guard lock(mTaskMutex);
-  mTaskQueue.push(task);
+  mTaskQueue.emplace(std::move(task));
   mTaskConditionVariable.notify_one();
 }
 
 void
-ThreadPool::PostTasks(std::span<Task *> tasks) noexcept
+ThreadPool::PostTasks(std::span<std::shared_ptr<TaskBase>> tasks) noexcept
 {
   std::lock_guard lock(mTaskMutex);
-  for (auto t : tasks) {
-    mTaskQueue.push(t);
-  }
+  mTaskQueue.push_range(tasks);
   mTaskConditionVariable.notify_all();
 }
 
-ThreadPool::ThreadPool() noexcept
-    : mThreadPool(), mTaskQueue(), mTaskGroup(), mTaskMutex(), mTaskConditionVariable()
-{
-}
+ThreadPool::ThreadPool() noexcept = default;
 
 ThreadPool::~ThreadPool()
 {
-  auto tasks = ShutdownTasks();
+
   for (auto &t : mThreadPool) {
     t->RequestStop();
   }
-  for (auto t : tasks) {
-    PostTask(t);
-  }
+
+  auto tasks = ShutdownTasks();
+  PostTasks(tasks);
 
   for (auto &t : mThreadPool) {
     if (t->IsJoinable()) {
@@ -55,7 +50,7 @@ void
 ThreadPool::Init(u32 pool_size) noexcept
 {
   mThreadPool.reserve(pool_size);
-  for (auto i = 0u; i < pool_size; ++i) {
+  for (auto i = 0U; i < pool_size; ++i) {
     mThreadPool.emplace_back(DebuggerThread::SpawnDebuggerThread(
       std::format("PoolWorker-{}", i), [&](std::stop_token &token) { WorkerLoop(token); }));
   }
@@ -67,34 +62,46 @@ ThreadPool::WorkerCount() const noexcept
   return mThreadPool.size();
 }
 
-std::vector<Task *>
-ThreadPool::ShutdownTasks() noexcept
+std::vector<std::shared_ptr<TaskBase>>
+ThreadPool::ShutdownTasks() const noexcept
 {
-  std::vector<Task *> res;
+  std::vector<std::shared_ptr<TaskBase>> res;
   const auto sz = WorkerCount();
   res.reserve(sz);
-  for (auto i = 0u; i < sz; ++i) {
-    res.push_back(new NoOp{});
+  for (auto i = 0U; i < sz; ++i) {
+    res.emplace_back(std::make_shared<NoOp>());
   }
   return res;
+}
+
+std::shared_ptr<TaskBase>
+ThreadPool::TakeFront()
+{
+  auto result = std::move(mTaskQueue.front());
+  mTaskQueue.pop();
+  return result;
 }
 
 void
 ThreadPool::WorkerLoop(std::stop_token &stop_token) noexcept
 {
-  while (true && !stop_token.stop_requested()) {
-    Task *job = nullptr;
+  while (!stop_token.stop_requested()) {
+    std::shared_ptr<TaskBase> job = nullptr;
     {
       std::unique_lock lock(mTaskMutex);
       while (mTaskQueue.empty()) {
         mTaskConditionVariable.wait(lock);
       }
-      job = mTaskQueue.front();
-      mTaskQueue.pop();
+      while (!mTaskQueue.empty()) {
+        job = TakeFront();
+        // Task has not been cancelled, execute it
+        if (!job->IsCancelled()) {
+          break;
+        }
+      }
     }
     MDB_ASSERT(job != nullptr, "Failed to retrieve work from task queue");
     job->Execute();
-    delete job;
   }
 }
 } // namespace mdb

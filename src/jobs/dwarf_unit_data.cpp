@@ -1,11 +1,16 @@
 /** LICENSE TEMPLATE */
 #include "dwarf_unit_data.h"
-#include "symbolication/cu_symbol_info.h"
-#include "symbolication/dwarf/debug_info_reader.h"
-#include "symbolication/dwarf/die.h"
-#include "symbolication/dwarf/rnglists.h"
+
+// mdb
+#include <symbolication/cu_symbol_info.h>
+#include <symbolication/dwarf/debug_info_reader.h>
+#include <symbolication/dwarf/die.h>
+#include <symbolication/dwarf/rnglists.h>
 #include <symbolication/objfile.h>
 #include <utils/thread_pool.h>
+
+// std
+#include <algorithm>
 namespace mdb::sym::dw {
 
 UnitDataTask::UnitDataTask(ObjectFile *obj, std::span<UnitHeader> headers) noexcept
@@ -153,7 +158,7 @@ UnitDataTask::ExecuteTask(std::pmr::memory_resource *) noexcept
 }
 
 /* static */
-std::vector<UnitDataTask *>
+std::vector<std::shared_ptr<StandardTask>>
 UnitDataTask::CreateParsingJobs(ObjectFile *obj, std::pmr::memory_resource *allocator) noexcept
 {
   UnitHeadersRead headerRead;
@@ -163,11 +168,10 @@ UnitDataTask::CreateParsingJobs(ObjectFile *obj, std::pmr::memory_resource *allo
   std::pmr::vector<sym::dw::UnitHeader> sortedBySize{ allocator };
   mdb::CopyTo(headerRead.Headers(), sortedBySize);
 
-  std::sort(sortedBySize.begin(), sortedBySize.end(), [](const UnitHeader &a, const UnitHeader &b) {
-    return a.CompilationUnitSize() > b.CompilationUnitSize();
-  });
+  std::ranges::sort(sortedBySize,
+    [](const UnitHeader &a, const UnitHeader &b) { return a.CompilationUnitSize() > b.CompilationUnitSize(); });
 
-  std::vector<UnitDataTask *> tasks;
+  std::vector<std::shared_ptr<StandardTask>> tasks;
   std::pmr::vector<u64> taskSize{ allocator };
 
   const auto workerCount = mdb::ThreadPool::GetGlobalPool()->WorkerCount();
@@ -177,18 +181,18 @@ UnitDataTask::CreateParsingJobs(ObjectFile *obj, std::pmr::memory_resource *allo
 
   for (auto header : sortedBySize) {
     // Find the subgroup with the smallest current total
-    const u64 minIndex = std::distance(taskSize.begin(), std::min_element(taskSize.begin(), taskSize.end()));
+    const u64 minIndex = std::distance(taskSize.begin(), std::ranges::min_element(taskSize));
 
     // Assign the number to this subgroup
     works[minIndex].push_back(header);
     taskSize[minIndex] += header.CompilationUnitSize();
   }
 
-  auto acc = 0u;
+  auto acc = 0U;
   for (auto &w : works) {
     if (!w.empty()) {
       acc += w.size();
-      tasks.push_back(new UnitDataTask{ obj, std::span{ w } });
+      tasks.emplace_back(std::make_shared<UnitDataTask>(obj, std::span{ w }));
     }
   }
 

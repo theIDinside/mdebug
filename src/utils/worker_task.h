@@ -8,33 +8,41 @@
 namespace mdb {
 class TaskGroup;
 
-class Task
+class TaskBase
 {
 public:
-  Task() noexcept = default;
-  virtual ~Task() noexcept = default;
+  TaskBase() noexcept = default;
+  virtual ~TaskBase() noexcept;
+
+  virtual void Execute() noexcept = 0;
+  void Cancel() noexcept;
+  [[nodiscard]] bool IsCancelled() const noexcept;
+
+protected:
+  bool mIsCancelled{ false };
+};
+
+class StandardTask : public TaskBase
+{
+public:
+  virtual ~StandardTask() noexcept override = default;
   void SetOwner(TaskGroup *group) noexcept;
-  void Execute() noexcept;
+  void Execute() noexcept override;
 
 protected:
   virtual void ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcept = 0;
-
-private:
-  bool IsGroupJob() const noexcept;
   TaskGroup *mOwningGroup{ nullptr };
 };
 
-class NoOp final : public Task
+class NoOp final : public StandardTask
 {
 public:
-  NoOp() noexcept : Task() {}
+  NoOp() noexcept = default;
   ~NoOp() noexcept override = default;
 
 protected:
   void ExecuteTask(std::pmr::memory_resource *temporaryAllocator) noexcept final;
 };
-
-using JobPtr = Task *;
 
 class TaskGroup
 {
@@ -44,20 +52,17 @@ public:
   TaskGroup(std::string_view name) noexcept;
   ~TaskGroup() noexcept = default;
 
-  void AddTask(Task *task) noexcept;
-
-  template <typename Task>
   void
-  AddTasks(std::span<Task *> tasks) noexcept
+  AddTasks(std::span<std::shared_ptr<StandardTask>> tasks) noexcept
   {
     std::lock_guard lock(mTaskLock);
-    for (auto t : tasks) {
-      mTasks.push_back(t);
+    for (std::shared_ptr<StandardTask> t : tasks) {
       t->SetOwner(this);
+      mTasks.push_back(std::move(t));
     }
   }
   std::future<void> ScheduleWork() noexcept;
-  void TaskDone(Task *task) noexcept;
+  void TaskDone(StandardTask *task) noexcept;
 
   alloc::ArenaResource *GetTemporaryAllocator() const noexcept;
 
@@ -65,8 +70,8 @@ private:
   std::promise<void> mPromise;
   std::string_view mName;
   std::mutex mTaskLock;
-  std::vector<Task *> mTasks;
-  std::vector<Task *> mDoneTasks;
+  std::vector<std::shared_ptr<TaskBase>> mTasks;
+  std::vector<StandardTask *> mDoneTasks;
   std::unique_ptr<alloc::ArenaResource> mGroupTemporaryAllocator;
 };
 } // namespace mdb

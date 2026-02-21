@@ -29,6 +29,7 @@
 #include <utils/logger.h>
 #include <utils/scope_defer.h>
 #include <utils/scoped_fd.h>
+#include <utils/task_list.h>
 #include <utils/todo.h>
 #include <utils/worker_task.h>
 
@@ -564,7 +565,8 @@ ObjectFile::SetSerializerFor(sym::Value &value) noexcept
 }
 
 auto
-ObjectFile::SearchDebugSymbolStringTable(const std::string &regex) const noexcept -> std::vector<std::string>
+ObjectFile::SearchDebugSymbolStringTableParallelized(const std::string &regex) const noexcept
+  -> std::vector<std::string>
 {
   // TODO(simon): Optimize. Regexing .debug_str in for instance libxul.so, takes 15 seconds (on O3, on -O0; it
   // takes 180 seconds)
@@ -573,17 +575,57 @@ ObjectFile::SearchDebugSymbolStringTable(const std::string &regex) const noexcep
     return {};
   }
 
-  std::string_view dbg_str{ elf->mDebugStr->GetDataAs<const char>() };
+  std::string_view stringTableView{ elf->mDebugStr->GetDataAs<const char>() };
 
-  auto it = std::regex_iterator<std::string_view::iterator>{ dbg_str.cbegin(), dbg_str.cend(), re };
+  auto jobSize = std::min<size_t>(stringTableView.size(), MegaByte(2));
+  std::vector<std::pair<size_t, size_t>> positions;
+  size_t previous = 0;
+  for (size_t i = jobSize; i < stringTableView.size(); i += jobSize) {
+    auto innerIndex = i;
+    while (innerIndex < stringTableView.size() && stringTableView[innerIndex] != 0) {
+      ++innerIndex;
+    }
+    positions.emplace_back(previous, innerIndex);
+    previous = i + innerIndex + 1;
+  }
+
+  // Split work into parallel tasks for large debug string sections
+  auto taskList = TaskList::Create<std::vector<std::string>>(TaskList::Unordered);
+
+  for (const auto &[start, end] : positions) {
+    std::string_view strSection = stringTableView.substr(start, end);
+    taskList->Add([strSection, re]() {
+      std::vector<std::string> results{};
+      auto it = std::regex_iterator<std::string_view::iterator>{ strSection.cbegin(), strSection.cend(), re };
+      for (decltype(it) end; it != end; ++it) {
+        const char *strPointer = strSection.data() + it->position();
+        results.emplace_back(strPointer);
+      }
+      return results;
+    });
+  }
+
+  // Collect results from all parallel tasks as they complete
   std::vector<std::string> results{};
-
-  for (decltype(it) end; it != end; ++it) {
-    const char *strPointer = elf->mDebugStr->GetCString(it->position());
-    results.emplace_back(strPointer);
+  for (const auto &taskResults : taskList->Commit()) {
+    if (!taskResults.empty()) {
+      std::ranges::move(taskResults, std::back_inserter(results));
+    }
   }
 
   return results;
+}
+
+auto
+ObjectFile::SearchDebugSymbolStringTable(const std::string &regexString) const noexcept -> std::vector<std::string>
+{
+  // TODO(simon): Optimize. Regexing .debug_str in for instance libxul.so, takes 15 seconds (on O3, on -O0; it
+  // takes 180 seconds)
+  if (elf->mDebugStr == nullptr) {
+    return {};
+  }
+
+  return SearchDebugSymbolStringTableParallelized(regexString);
 }
 
 auto
@@ -1021,7 +1063,7 @@ SymbolFile::LookupFunctionBreakpointBySpec(const BreakpointSpecification &bpSpec
   }
 
   for (const auto &n : searchFor) {
-    auto ni = obj->GetNameIndex();
+    sym::dw::ObjectFileNameIndex *ni = obj->GetNameIndex();
     ni->ForEachFn(n, [&](const sym::dw::DieNameReference &ref) {
       auto dieReference = ref.cu->GetDieByCacheIndex(ref.die_index);
       auto lowPc = dieReference.ReadAttribute(Attribute::DW_AT_low_pc);
@@ -1043,11 +1085,13 @@ SymbolFile::LookupFunctionBreakpointBySpec(const BreakpointSpecification &bpSpec
   for (const auto &sym : matchingSymbols) {
     const auto relocatedAddress = sym.address + mBaseAddress;
     if (!bpsSet.contains(relocatedAddress)) {
-      for (auto cu : GetCompilationUnits(relocatedAddress)) {
+      for (sym::CompilationUnit *cu : GetCompilationUnits(relocatedAddress)) {
         const auto [sourceFile, lineEntry] = cu->GetLineTableEntry(sym.address);
         if (sourceFile && lineEntry) {
           result.emplace_back(relocatedAddress,
-            LocationSourceInfo{ sourceFile->mFullPath.StringView(), lineEntry->line, u32{ lineEntry->column } });
+            LocationSourceInfo{ .mSourceFile = sourceFile->mFullPath.StringView(),
+              .mLineNumber = lineEntry->line,
+              .mColumnNumber = u32{ lineEntry->column } });
           bpsSet.insert(relocatedAddress);
           break;
         }

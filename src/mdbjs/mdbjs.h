@@ -71,7 +71,7 @@ class EventDispatcher;
   FNDESC(Help, "help", 1, "Show this help message.")                                                              \
   FNDESC(RegisterResolver,                                                                                        \
     "registerResolver",                                                                                           \
-    2,                                                                                                            \
+    3,                                                                                                            \
     "Register a value resolver, resolving your types in the fashion that you're interested in. ")                 \
   FNDESC(LoadScript, "loadScript", 1, "Load and execute a JavaScript file from an absolute path.")
 

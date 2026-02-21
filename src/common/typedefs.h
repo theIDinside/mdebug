@@ -183,6 +183,20 @@ template <typename ReturnType, typename... Args> struct ToFunction<std::tuple<Re
 #define KiloBytes(KB) 1024 * KB
 #define MegaBytes(MB) 1024 * 1024 * MB
 
+template <typename T>
+consteval auto
+KiloByte(T count)
+{
+  return decltype(count){ 1024 } * count;
+}
+
+template <typename T>
+consteval auto
+MegaByte(T count)
+{
+  return decltype(count){ 1024 } * KiloByte(count);
+}
+
 // SessionId of -1 means "unset",  "unknown", or "not yet initialized".
 using SessionId = i32;
 static constexpr auto kProcessId = std::string_view{ "processId" };

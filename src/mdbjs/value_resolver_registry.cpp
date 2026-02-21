@@ -34,9 +34,10 @@ Resolver::Resolve(const VariableContext &context, sym::ValueRange valueRange) no
   return resolvedValues;
 }
 
-Resolver::Resolver(JSContext *cx, std::string name, std::string pattern, JSValue function)
-    : mResolverName(std::move(name)), mResolverPattern(std::move(pattern)), mResolverFn(JS_DupValue(cx, function)),
-      mContext(cx)
+Resolver::Resolver(
+  JSContext *cx, std::string objectFileName, std::string name, std::string pattern, JSValue function)
+    : mObjectFileName(std::move(objectFileName)), mResolverName(std::move(name)),
+      mResolverPattern(std::move(pattern)), mResolverFn(JS_DupValue(cx, function)), mContext(cx)
 {
 }
 
@@ -147,22 +148,29 @@ ResolverRegistry::GetResolver(sym::Type *type)
 void
 ResolverRegistry::OnNewSymbolFile(SymbolFile *symbolFile)
 {
-  for (const auto &resolver : mResolvers) {
-    symbolFile->ForEachTypeMatching(
-      resolver->mResolverPattern, false, [&](sym::Type *matchedType) { SetResolverFor(matchedType, resolver); });
+  for (const auto &entry : mResolvers) {
+    if (symbolFile->GetObjectFilePath().filename() == entry->mObjectFileName) {
+      DBGLOG(core, "Register resolver {} with {}", entry->mResolverName, symbolFile->GetObjectFilePath().c_str());
+      symbolFile->ForEachTypeMatching(
+        entry->mResolverPattern, false, [&](sym::Type *matchedType) { SetResolverFor(matchedType, entry); });
+    }
   }
 }
 
 void
-ResolverRegistry::RegisterResolver(std::string resolverName, std::string resolverPattern, JSValue resolverFn)
+ResolverRegistry::RegisterResolver(
+  std::string_view fileName, std::string_view resolverName, std::string_view resolverPattern, JSValue resolverFn)
 {
-  auto entry =
-    std::make_shared<Resolver>(mContext, std::move(resolverName), std::move(resolverPattern), resolverFn);
+  auto entry = std::make_shared<Resolver>(
+    mContext, std::string(fileName), std::string(resolverName), std::string(resolverPattern), resolverFn);
 
   Tracer::ForEachObjectFile([&](ObjectFile &obj) {
-    DBGLOG(core, "Register resolver {} with {}", entry->mResolverName, obj.GetPathString());
-    obj.ForEachTypeMatching(
-      entry->mResolverPattern, false, [&](sym::Type *matchedType) { SetResolverFor(matchedType, entry); });
+    if (obj.GetFilePath().filename() == fileName) {
+      DBGLOG(core, "Register resolver {} with {}", entry->mResolverName, obj.GetPathString());
+      obj.ForEachTypeMatching(
+        entry->mResolverPattern, false, [&](sym::Type *matchedType) { SetResolverFor(matchedType, entry); });
+      return false;
+    }
     return true;
   });
 

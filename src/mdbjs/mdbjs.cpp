@@ -232,7 +232,7 @@ Scripting::RegisterResolver(
   JSContext *cx, [[maybe_unused]] JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
 {
   if (argCount < 2) {
-    return JS_ThrowTypeError(cx, "Invalid args: requires ({name, match}, resolveApplyFn)");
+    return JS_ThrowTypeError(cx, "Invalid args: requires ({name, match, objectFileName}, resolveApplyFn)");
   }
 
   if (!JS_IsObject(argv[0])) {
@@ -242,23 +242,20 @@ Scripting::RegisterResolver(
 
   // Validate that the object contains 'name' and 'match' fields of type string
 
-  StackValue nameValue = StackValue::GetPropertyString(cx, argv[0], "name");
-  StackValue matchValue = StackValue::GetPropertyString(cx, argv[0], "match");
+  constexpr static std::string_view fields[]{ "name"sv, "match"sv, "objectFileName"sv };
 
-  if (JS_IsUndefined(nameValue)) {
-    return JS_ThrowTypeError(cx, "Invalid args: object must contain a 'name' field");
-  }
+  std::array<StackValue, 3> properties;
+  std::ranges::transform(fields, properties.begin(), [&](const auto &name) {
+    return StackValue::GetPropertyString(cx, argv[0], name.data());
+  });
 
-  if (JS_IsUndefined(matchValue)) {
-    return JS_ThrowTypeError(cx, "Invalid args: object must contain a 'match' field");
-  }
-
-  if (!JS_IsString(nameValue)) {
-    return JS_ThrowTypeError(cx, "Invalid args: 'name' field must be of type string");
-  }
-
-  if (!JS_IsString(matchValue)) {
-    return JS_ThrowTypeError(cx, "Invalid args: 'match' field must be of type string");
+  for (const auto &[index, prop] : std::ranges::enumerate_view{ properties }) {
+    if (JS_IsUndefined(prop)) {
+      return JS_ThrowTypeError(cx, "Invalid args: object must contain a '%s' field", fields[index].data());
+    }
+    if (!JS_IsString(prop)) {
+      return JS_ThrowTypeError(cx, "Invalid args: '%s' field must be of type string", fields[index].data());
+    }
   }
 
   if (!JS_IsFunction(cx, argv[1])) {
@@ -266,10 +263,11 @@ Scripting::RegisterResolver(
       cx, "Invalid args: second argument must be a function that returns an array of JsVariables");
   }
 
-  auto name = QuickJsString::FromValue(cx, nameValue);
-  auto match = QuickJsString::FromValue(cx, matchValue);
+  auto name = QuickJsString::FromValue(cx, properties[0]);
+  auto match = QuickJsString::FromValue(cx, properties[1]);
+  auto fileName = QuickJsString::FromValue(cx, properties[2]);
 
-  Get().mRegistry->RegisterResolver(std::string{ name.mString }, std::string{ match.mString }, argv[1]);
+  Get().mRegistry->RegisterResolver(fileName.mString, name.mString, match.mString, argv[1]);
 
   return JS_UNDEFINED;
 }

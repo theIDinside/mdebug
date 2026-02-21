@@ -24,9 +24,9 @@ public:
   void Init(u32 pool_size) noexcept;
   u32 WorkerCount() const noexcept;
   static ThreadPool *GetGlobalPool() noexcept;
-  void PostTask(Task *task) noexcept;
-  void PostTasks(std::span<Task *> tasks) noexcept;
-  std::vector<Task *> ShutdownTasks() noexcept;
+  void PostTask(std::shared_ptr<TaskBase> task) noexcept;
+  void PostTasks(std::span<std::shared_ptr<TaskBase>> tasks) noexcept;
+  std::vector<std::shared_ptr<TaskBase>> ShutdownTasks() const noexcept;
   void WorkerLoop(std::stop_token &stop_token) noexcept;
 
   static void
@@ -36,9 +36,11 @@ public:
   }
 
 private:
+  std::shared_ptr<TaskBase> TakeFront();
+
   static ThreadPool *sGlobalThreadPool;
   std::vector<std::unique_ptr<DebuggerThread>> mThreadPool;
-  std::queue<Task *> mTaskQueue;
+  std::queue<std::shared_ptr<TaskBase>> mTaskQueue;
   std::queue<std::unique_ptr<TaskGroup>> mTaskGroup;
   std::mutex mTaskMutex;
   std::condition_variable mTaskConditionVariable;

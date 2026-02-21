@@ -166,4 +166,23 @@ NameIndex::Search(std::string_view name) const noexcept
   return result;
 }
 
+void
+ObjectFileNameIndex::ForEachFn(
+  std::string_view name, const std::function<void(const sym::dw::DieNameReference &ref)> &f) const noexcept
+{
+  if (const auto freeFunctionResults = mFreeFunctions.Search(name); freeFunctionResults) {
+    const auto &res = freeFunctionResults.value();
+    for (const auto &functionDie : res) {
+      f(functionDie);
+    }
+  }
+
+  if (const auto methodResults = mMethods.Search(name); methodResults) {
+    const auto &res = methodResults.value();
+    for (const auto &methodDie : res) {
+      f(methodDie);
+    }
+  }
+}
+
 } // namespace mdb::sym::dw

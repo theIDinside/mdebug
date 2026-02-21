@@ -807,7 +807,7 @@ Session::GetUserRegister(const TaskInfo &t, size_t registerNumber) noexcept
   // this should be safe rr::NativeArch::user_regs_struct -> user_regs_struct
   const auto internalData = mReplaySupervisor->GetTask(t.mTid)->regs().get_regs_for_trace();
   const auto index = GetDwarfRegisterIndex(registerNumber);
-  auto *ptr = reinterpret_cast<const u64 *>(internalData.data);
+  const auto *ptr = reinterpret_cast<const u64 *>(internalData.data);
   return *(ptr + index);
 }
 
