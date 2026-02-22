@@ -216,7 +216,7 @@ public:
   ui::dap::DapEventSystem *GetDap() const noexcept;
 
   static void InitInterpreterAndStartDebugger(
-    std::unique_ptr<DebuggerThread> debugAdapterThread, EventSystem *eventSystem) noexcept;
+    std::unique_ptr<DebuggerThread> debugAdapterThread, EventSystem *eventSystem, js::Scripting *engine) noexcept;
   static void InitializeDapSerializers() noexcept;
 
   void Shutdown() noexcept;

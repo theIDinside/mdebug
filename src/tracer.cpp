@@ -516,13 +516,12 @@ Tracer::NewSupervisorId() noexcept
 /* static */
 void
 Tracer::InitInterpreterAndStartDebugger(
-  std::unique_ptr<DebuggerThread> debugAdapterThread, EventSystem *eventSystem) noexcept
+  std::unique_ptr<DebuggerThread> debugAdapterThread, EventSystem *eventSystem, js::Scripting *engine) noexcept
 {
   Get().mDebugAdapterThread = std::move(debugAdapterThread);
 
-  auto interpreter = js::Scripting::Create();
-  MainLoop(eventSystem, interpreter);
-  interpreter->Shutdown();
+  MainLoop(eventSystem, engine);
+  engine->Shutdown();
 }
 
 void

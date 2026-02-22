@@ -14,6 +14,11 @@
 #include <utils/logger.h>
 
 // system
+#include <cstdlib>
+#include <filesystem>
+#include <limits.h>
+#include <unistd.h>
+
 // dependency
 #include <mdbjs/include-quickjs.h>
 
@@ -299,6 +304,90 @@ Scripting::LoadScript(
   };
 
   return JS_UNDEFINED;
+}
+
+/* static */ std::optional<Path>
+Scripting::GetConfigFilePath(bool useXdg) noexcept
+{
+  if (useXdg) {
+    // Try XDG_CONFIG_HOME first
+    const char *xdgConfigHome = std::getenv("XDG_CONFIG_HOME");
+    if (xdgConfigHome && xdgConfigHome[0] != '\0') {
+      return Path{ xdgConfigHome } / "mdb" / "mdbinit.js";
+    }
+
+    // Fallback to ~/.config
+    const char *home = std::getenv("HOME");
+    if (home && home[0] != '\0') {
+      return Path{ home } / ".config" / "mdb" / "mdbinit.js";
+    }
+    return std::nullopt;
+  }
+
+  // Get executable directory
+  char exePath[PATH_MAX];
+  ssize_t len = readlink("/proc/self/exe", exePath, sizeof(exePath) - 1);
+  if (len == -1) {
+    return std::nullopt;
+  }
+  exePath[len] = '\0';
+  Path p{ exePath };
+  return p.parent_path() / "config" / "mdbinit.js";
+}
+
+/* static */ void
+Scripting::TryLoadConfigFile(const Path &configPath) noexcept
+{
+  namespace fs = std::filesystem;
+
+  // Silently skip if file doesn't exist
+  if (!fs::exists(configPath)) {
+    return;
+  }
+
+  DBGLOG(interpreter, "Loading config file: {}", configPath.string());
+
+  // Open the config file
+  ScopedFd f = ScopedFd::Open(configPath);
+  if (!f.IsOpen()) {
+    DBGLOG(warning, "Failed to open config file: {}", configPath.string());
+    return;
+  }
+
+  // Memory map the file
+  MemoryMapping data = f.MemoryMap<char>();
+  if (!data.IsOpen()) {
+    DBGLOG(warning, "Failed to memory map config file: {}", configPath.string());
+    return;
+  }
+
+  // Execute the script
+  StackValue result =
+    StackValue::Eval(Get().mContext, data.Data(), data.FileContentsLength(), configPath.string().c_str());
+
+  // Check for JavaScript exceptions
+  if (JS_IsException(result)) {
+    if (auto ex = JavascriptException::GetException(Get().mContext)) {
+      DBGLOG(warning, "Error in config file {}: {}", configPath.string(), ex->mExceptionMessage);
+      if (!ex->mStackTrace.empty()) {
+        DBGLOG(interpreter, "Stack trace:\n{}", ex->mStackTrace);
+      }
+    }
+  }
+}
+
+/* static */ void
+Scripting::LoadConfigFiles() noexcept
+{
+  // Load XDG config first
+  if (auto xdgPath = GetConfigFilePath(true)) {
+    TryLoadConfigFile(*xdgPath);
+  }
+
+  // Load executable directory config second
+  if (auto exePath = GetConfigFilePath(false)) {
+    TryLoadConfigFile(*exePath);
+  }
 }
 
 void

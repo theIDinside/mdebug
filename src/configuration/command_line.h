@@ -2,7 +2,6 @@
 #pragma once
 
 // mdb
-#include "utils/util.h"
 #include <common.h>
 #include <common/formatter.h>
 #include <common/typedefs.h>
@@ -10,6 +9,7 @@
 #include <utils/algorithm.h>
 #include <utils/command.h>
 #include <utils/format_utils.h>
+#include <utils/util.h>
 
 // system
 #include <sys/ioctl.h>

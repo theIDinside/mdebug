@@ -1,10 +1,9 @@
 /** LICENSE TEMPLATE */
 #include "command_line.h"
-#include <common/formatter.h>
 
 // mdb
 #include <common.h>
-
+#include <common/formatter.h>
 #include <events/event.h>
 #include <utils/logger.h>
 

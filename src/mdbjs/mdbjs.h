@@ -73,7 +73,11 @@ class EventDispatcher;
     "registerResolver",                                                                                           \
     3,                                                                                                            \
     "Register a value resolver, resolving your types in the fashion that you're interested in. ")                 \
-  FNDESC(LoadScript, "loadScript", 1, "Load and execute a JavaScript file from an absolute path.")
+  FNDESC(LoadScript, "loadScript", 1, "Load and execute a JavaScript file from an absolute path.")                \
+  FNDESC(SetThreadPoolSize,                                                                                       \
+    "setThreadPoolSize",                                                                                          \
+    1,                                                                                                            \
+    "Set the amount of worker threads the global thread pool shall have.")
 
 using JsFunction = JSValue (*)(JSContext *ctx, JSValueConst thisValue, int argCount, JSValueConst *argv);
 
@@ -116,6 +120,9 @@ private:
   void InitializeMdbModule() noexcept;
   void InitModuleConstants(JSValue globalObject) noexcept;
 
+  static std::optional<Path> GetConfigFilePath(bool useXdg) noexcept;
+  static void TryLoadConfigFile(const Path &configPath) noexcept;
+
   static constexpr auto
   FunctionDescriptors() noexcept -> std::span<const FunctionDescriptor>
   {
@@ -143,6 +150,8 @@ public:
   static Scripting *Create() noexcept;
   static Scripting &Get() noexcept;
   static alloc::ArenaResource *GetAllocator() noexcept;
+
+  static void LoadConfigFiles() noexcept;
 
   constexpr JSContext *
   GetContext() noexcept

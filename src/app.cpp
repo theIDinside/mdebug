@@ -2,6 +2,7 @@
 #include "app.h"
 
 // mdb
+#include <mdbjs/mdbjs.h>
 #include <tracer.h>
 #include <utils/debugger_thread.h>
 #include <utils/logger.h>
@@ -29,7 +30,9 @@ InitializeCommandsInRegistry(cfg::CommandLineRegistry &parser)
       for (const auto &opt : p.GetOptions()) {
         if (*v == opt->mLongName || *v == opt->mShortName) {
           auto [left, right] = p.GetTerminalSize();
-          UsagePrintFormatting<mdb::cfg::OptionMetadata> arg{ *opt, left, right };
+          UsagePrintFormatting<mdb::cfg::OptionMetadata> arg{
+            .mValue = *opt, .mLeftColumnWidth = left, .mRightColumnWidth = right
+          };
           std::println("{}", arg);
           handled = true;
         }
@@ -40,7 +43,7 @@ InitializeCommandsInRegistry(cfg::CommandLineRegistry &parser)
     }
     if (!unknown.empty()) {
       std::println("Unrecognized input ({}):", unknown.size());
-      std::println("{}", JoinFormatIterator{ unknown, "\n" });
+      std::println("{}", JoinFormatIterator{ .mContainer = unknown, .mDelimiter = "\n" });
     }
     exit(0);
   });
@@ -52,7 +55,7 @@ Start(int argc, const char **argv, [[maybe_unused]] const char **envp)
   static mdb::cfg::CommandLineRegistry parser{};
 
   InitializeCommandsInRegistry(parser);
-  auto configurationOptions = mdb::cfg::InitializationConfiguration::ConfigureWithParser(parser);
+  auto *configurationOptions = mdb::cfg::InitializationConfiguration::ConfigureWithParser(parser);
 
   mdb::cfg::CommandLineResult result = parser.Parse(argc, argv);
   if (!result.mErrors.empty()) {
@@ -69,6 +72,10 @@ Start(int argc, const char **argv, [[maybe_unused]] const char **envp)
   EventSystem *eventSystem = EventSystem::Initialize();
   logging::Logger::ConfigureLogging(*configurationOptions);
 
+  Tracer::Create();
+  js::Scripting *engine = js::Scripting::Create();
+  js::Scripting::LoadConfigFiles();
+
   // Thread pool size has a default value. If it's been parsed by the CLI parser, it will return that value
   // It's safe to access all configuration values (that has defaults) after parse, since if there were parse
   // errors, mdb exits. mdb does not allow fallback from errors during cli args parse, only defaults for not-seen
@@ -76,7 +83,7 @@ Start(int argc, const char **argv, [[maybe_unused]] const char **envp)
   ThreadPool::GetGlobalPool()->Init(configurationOptions->mThreadPoolSize);
 
   signal(SIGTERM, [](int sig) {
-    if (auto logger = logging::ProfilingLogger::Instance(); logger && sig == SIGTERM) {
+    if (auto *logger = logging::ProfilingLogger::Instance(); logger && sig == SIGTERM) {
       logger->Shutdown();
     }
     EventSystem::Get().PushInternalEvent(TerminateDebugging{});
@@ -87,8 +94,6 @@ Start(int argc, const char **argv, [[maybe_unused]] const char **envp)
   for (const auto arg : std::span{ argv, argv + argc }.subspan(1)) {
     DBGLOG(core, "{}", arg);
   }
-
-  Tracer::Create();
 
   // spawn the UI thread that runs our UI loop
   bool uiThreadSetup = false;
@@ -126,7 +131,7 @@ Start(int argc, const char **argv, [[maybe_unused]] const char **envp)
   DBGLOG(core, "UI thread initialized and configured.");
 
   Tracer::InitializeDapSerializers();
-  Tracer::InitInterpreterAndStartDebugger(std::move(debugAdapterThread), eventSystem);
+  Tracer::InitInterpreterAndStartDebugger(std::move(debugAdapterThread), eventSystem, engine);
   Tracer::Get().Shutdown();
 
   DBGLOG(core, "Exited...");
