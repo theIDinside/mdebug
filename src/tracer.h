@@ -179,7 +179,7 @@ public:
   void HandleReplayStopEvent(ReplayEvent evt) noexcept;
 
   void HandleInternalEvent(const InternalEvent &evt) noexcept;
-  void EraseSessionDuringReverse(Pid processId) noexcept;
+  void MarkSessionAsDead(Pid processId) noexcept;
   std::pmr::string *EvaluateDebugConsoleExpression(const std::string &expression, Allocator *allocator) noexcept;
 
   void SetUI(ui::dap::DapEventSystem *dap) noexcept;

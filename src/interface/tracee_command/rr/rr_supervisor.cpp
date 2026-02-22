@@ -332,6 +332,16 @@ ReplaySupervisor::RemoveBreakpoint(pid_t recordedTid, BreakpointRequest req)
 {
   MUTEX_RUNNING(false);
   rr::ReplayTask *task = mTimeline->current_session().find_task(recordedTid);
+  if (!task) {
+    return false;
+  }
+
+  if (!mTimeline->has_breakpoint_at_address(task, rr::remote_code_ptr{ req.address })) {
+    // Somehow state in the actual rr supervisor as became un-sync for our layer. So we simply return true here,
+    // signalling that we successfully removed the breakpoint (which technically we can think of it as doing,
+    // because apparently MDB's RR layer will now be sync'ed)
+    return true;
+  }
   if (req.is_hardware) {
     mTimeline->remove_watchpoint(task, rr::remote_ptr<void>{ req.address }, 1, rr::WatchType::WATCH_EXEC);
   } else {
@@ -981,7 +991,7 @@ ReplaySupervisor::ReplaySupervisor(const RRInitOptions &initOptions) noexcept
 void
 ReplaySupervisor::Erase(Session *session) noexcept
 {
-  auto it = std::find(mTimelineSupervisors.begin(), mTimelineSupervisors.end(), session);
+  auto it = std::ranges::find(mTimelineSupervisors, session);
   if (it != std::end(mTimelineSupervisors)) {
     mTimelineSupervisors.erase(it);
   }
@@ -991,13 +1001,12 @@ ReplaySupervisor::Erase(Session *session) noexcept
 ReplaySupervisor *
 ReplaySupervisor::Create(const RRInitOptions &initOptions) noexcept
 {
-  auto supervisor = new ReplaySupervisor{ initOptions };
+  auto *supervisor = new ReplaySupervisor{ initOptions };
 
   // Configure the event handler. The replay supervisor thread will post events, which gets pre-processed here
   // then pushed to the debugger core subsystem
   supervisor->SetEventHandler([](const SupervisorEvent &evt, void *userData) {
-    DBGBUFLOG(core, "Run replay session event handler");
-    ReplaySupervisor *supervisor = static_cast<ReplaySupervisor *>(userData);
+    auto *supervisor = static_cast<ReplaySupervisor *>(userData);
     std::visit(
       [&](auto &&event) {
         using T = std::decay_t<decltype(event)>;

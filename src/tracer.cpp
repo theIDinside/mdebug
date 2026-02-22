@@ -203,7 +203,7 @@ Tracer::HandleReplayStopEvent(ReplayEvent evt) noexcept
     }
 
     for (const auto &sessionId : sessionsToShutDown) {
-      EraseSessionDuringReverse(sessionId);
+      MarkSessionAsDead(sessionId);
     }
 
     for (auto &s : mTracedProcesses) {
@@ -244,7 +244,7 @@ Tracer::HandleInternalEvent(const InternalEvent &evt) noexcept
 }
 
 void
-Tracer::EraseSessionDuringReverse(Pid processId) noexcept
+Tracer::MarkSessionAsDead(Pid processId) noexcept
 {
   auto iterator = FindIf(
     mTracedProcesses, [processId](const tc::SupervisorState &state) { return state.GetProcessId() == processId; });
