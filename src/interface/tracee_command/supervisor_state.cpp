@@ -1220,7 +1220,7 @@ SupervisorState::FindFunctionByPc(AddrPtr addr) noexcept
     "supervisor",
     PEARG("cu_count", matchingCompilationUnits.size()),
     PEARG("unreloc_addr", symbolFile->UnrelocateAddress(addr)),
-    PEARG("found_fn", foundFn ? foundFn->name : "not found"));
+    PEARG("found_fn", foundFn ? foundFn->mName : "not found"));
 
   using sym::CompilationUnit;
 

@@ -14,16 +14,15 @@ DetermineArchitectureReturnClass(sym::Type *type) noexcept
 FunctionSymbol::FunctionSymbol(AddrPtr start,
   AddrPtr end,
   std::string_view name,
-  std::string_view member_of,
-  sym::Type *return_type,
-  std::array<dw::IndexedDieReference, 3> maybe_origin,
-  CompilationUnit &decl_file,
-  std::span<const u8> fb_expr,
+  std::string_view memberOf,
+  sym::Type *returnType,
+  std::array<dw::IndexedDieReference, 3> maybeOrigin,
+  CompilationUnit &declFile,
+  std::span<const u8> fbExpr,
   std::optional<SourceCoordinate> &&source) noexcept
-    : mDeclaringCompilationUnit(NonNull(decl_file)), mFormalParametersBlock({ { start, end } }, {}),
-      mFunctionSymbolBlocks(), mMaybeOriginDies(maybe_origin), mFrameBaseDwarfExpression(fb_expr),
-      mFunctionReturnType(return_type), pc_start(start), pc_end_exclusive(end), member_of(member_of), name(name),
-      source(std::move(source))
+    : mDeclaringCompilationUnit(NonNull(declFile)), mFormalParametersBlock({ { start, end } }, {}),
+      mMaybeOriginDies(maybeOrigin), mFrameBaseDwarfExpression(fbExpr), mFunctionReturnType(returnType),
+      mStartPc(start), mExclusiveEndPc(end), mMemberOf(memberOf), mName(name), mSource(std::move(source))
 {
 }
 
@@ -32,20 +31,21 @@ FunctionSymbol::FunctionSymbol(FunctionSymbol &&fn) noexcept
       mFormalParametersBlock(std::move(fn.mFormalParametersBlock)),
       mFunctionSymbolBlocks(std::move(fn.mFunctionSymbolBlocks)), mMaybeOriginDies(fn.mMaybeOriginDies),
       mFrameBaseDwarfExpression(fn.mFrameBaseDwarfExpression), mFunctionReturnType(fn.mFunctionReturnType),
-      pc_start(fn.pc_start), pc_end_exclusive(fn.pc_end_exclusive), member_of(fn.member_of), name(fn.name),
-      source(std::move(fn.source))
+      mStartPc(fn.mStartPc), mExclusiveEndPc(fn.mExclusiveEndPc), mMemberOf(fn.mMemberOf), mName(fn.mName),
+      mSource(std::move(fn.mSource))
 {
 }
 
 AddrPtr
 FunctionSymbol::StartPc() const noexcept
 {
-  return pc_start;
+  return *mStartPc;
 }
+
 AddrPtr
 FunctionSymbol::EndPc() const noexcept
 {
-  return pc_end_exclusive;
+  return *mExclusiveEndPc;
 }
 
 CompilationUnit *
@@ -57,13 +57,12 @@ FunctionSymbol::GetCompilationUnit() noexcept
 std::span<const dw::IndexedDieReference>
 FunctionSymbol::OriginDebugInfoEntries() const noexcept
 {
-  auto &dies = *mMaybeOriginDies;
-  for (auto i = 0u; i < dies.size(); ++i) {
-    if (!dies[i].IsValid()) {
-      return std::span{ dies.begin(), dies.begin() + i };
+  for (size_t i = 0; i < mMaybeOriginDies->size(); ++i) {
+    if (!mMaybeOriginDies[i].IsValid()) {
+      return std::span{ mMaybeOriginDies->begin(), mMaybeOriginDies->begin() + i };
     }
   }
-  return dies;
+  return mMaybeOriginDies;
 }
 
 bool
@@ -132,7 +131,7 @@ IsSame(const FunctionSymbol *l, const FunctionSymbol *r) noexcept
 bool
 IsSame(const FunctionSymbol &l, const FunctionSymbol &r) noexcept
 {
-  return *l.name == *r.name && *l.pc_start == *r.pc_start && *l.pc_end_exclusive == *r.pc_end_exclusive;
+  return *l.mName == *r.mName && *l.mStartPc == *r.mStartPc && *l.mExclusiveEndPc == *r.mExclusiveEndPc;
 }
 
 } // namespace mdb::sym

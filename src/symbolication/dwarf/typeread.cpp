@@ -1,16 +1,17 @@
 /** LICENSE TEMPLATE */
 #include "typeread.h"
-#include "lib/static_vector.h"
-#include "symbolication/block.h"
-#include "symbolication/dwarf/attribute_read.h"
-#include "symbolication/dwarf/debug_info_reader.h"
-#include "symbolication/dwarf/die_iterator.h"
-#include "symbolication/dwarf_attribute_value.h"
-#include "symbolication/dwarf_defs.h"
-#include "symbolication/type.h"
-#include "utils/logger.h"
+
+// mdb
+#include <symbolication/block.h>
 #include <symbolication/callstack.h>
+#include <symbolication/dwarf/attribute_read.h>
+#include <symbolication/dwarf/debug_info_reader.h>
+#include <symbolication/dwarf/die_iterator.h>
+#include <symbolication/dwarf_attribute_value.h>
+#include <symbolication/dwarf_defs.h>
 #include <symbolication/objfile.h>
+#include <symbolication/type.h>
+#include <utils/logger.h>
 
 namespace mdb::sym::dw {
 
@@ -200,7 +201,7 @@ FunctionSymbolicationContext::ProcessSymbolInformation() noexcept
 {
   PROFILE_SCOPE_ARGS("FunctionSymbolicationContext::ProcessSymbolInformation",
     "symbolication",
-    PEARG("function", this->mFunctionSymbol->name));
+    PEARG("function", this->mFunctionSymbol->mName));
   if (mFunctionSymbol->IsResolved()) {
     return;
   }

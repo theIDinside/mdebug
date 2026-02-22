@@ -332,17 +332,16 @@ StepInto::Create(tc::SupervisorState &ctrl, TaskInfo &task) noexcept
 
   auto compilationUnits = symbolFile->GetCompilationUnits(framePc);
 
-  for (auto compilationUnit : compilationUnits) {
-    const auto [sourceCodeFile, lineTableEntry] =
-      compilationUnit->GetLineTableEntry(symbolFile->UnrelocateAddress(framePc));
+  for (sym::CompilationUnit *compilationUnit : compilationUnits) {
+    const auto unrelocatedAddr = symbolFile->UnrelocateAddress(framePc);
+    const auto [sourceCodeFile, lineTableEntry] = compilationUnit->GetLineTableEntry(unrelocatedAddr);
     if (sourceCodeFile && lineTableEntry) {
       const auto relocPc = lineTableEntry->RelocateProgramCounter(symbolFile->mBaseAddress);
-      if (startFrame.IsInside(relocPc) == sym::InsideRange::Yes) {
+      if (startFrame.IsInside(unrelocatedAddr) == sym::InsideRange::Yes) {
         if (relocPc == framePc) {
           return std::make_shared<StepInto>(ctrl, task, startFrame, *lineTableEntry);
-        } else {
-          return std::make_shared<StepInto>(ctrl, task, startFrame, *(lineTableEntry - 1));
         }
+        return std::make_shared<StepInto>(ctrl, task, startFrame, *(lineTableEntry - 1));
       }
     }
   }
