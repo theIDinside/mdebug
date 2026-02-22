@@ -1,9 +1,10 @@
 /** LICENSE TEMPLATE */
 #pragma once
-#include "../common.h"
-#include "addr_sorter.h"
-#include "symbolication/type.h"
-#include "utils/immutable.h"
+// mdb
+#include <common.h>
+#include <symbolication/addr_sorter.h>
+#include <symbolication/type.h>
+#include <utils/immutable.h>
 
 namespace mdb::sym {
 namespace dw {
@@ -13,7 +14,7 @@ class CompilationUnit;
 
 struct ResolveFnSymbolState;
 
-enum class ReturnValueClass
+enum class ReturnValueClass : u8
 {
   ImplicitPointerToMemory,
   RaxRdxPair,
@@ -48,12 +49,12 @@ private:
   FunctionSymbol(AddrPtr start,
     AddrPtr end,
     std::string_view name,
-    std::string_view member_of,
-    sym::Type *return_type,
-    std::array<dw::IndexedDieReference, 3> maybe_origin,
-    CompilationUnit &decl_file,
-    std::span<const u8> fb_expr,
-    std::optional<SourceCoordinate> &&source_coord) noexcept;
+    std::string_view memberOf,
+    sym::Type *returnType,
+    std::array<dw::IndexedDieReference, 3> maybeOrigin,
+    CompilationUnit &declFile,
+    std::span<const u8> fbExpr,
+    std::optional<SourceCoordinate> &&sourceCoord) noexcept;
 
 public:
   // Only really used when constructing the full function symbols for a compilation unit, as std::vector grows, it
@@ -62,11 +63,11 @@ public:
   FunctionSymbol(FunctionSymbol &&fn) noexcept;
   FunctionSymbol &operator=(FunctionSymbol &&fn) noexcept = default;
 
-  Immutable<AddrPtr> pc_start;
-  Immutable<AddrPtr> pc_end_exclusive;
-  Immutable<std::string_view> member_of;
-  Immutable<std::string_view> name;
-  Immutable<std::optional<SourceCoordinate>> source;
+  Immutable<AddrPtr> mStartPc;
+  Immutable<AddrPtr> mExclusiveEndPc;
+  Immutable<std::string_view> mMemberOf;
+  Immutable<std::string_view> mName;
+  Immutable<std::optional<SourceCoordinate>> mSource;
 
   AddrPtr StartPc() const noexcept;
   AddrPtr EndPc() const noexcept;
@@ -123,6 +124,6 @@ template <> struct std::formatter<sym::FunctionSymbol>
   auto
   format(const sym::FunctionSymbol &var, FormatContext &ctx) const
   {
-    return std::format_to(ctx.out(), "fn={}, [{} .. {}]", var.name, var.StartPc(), var.EndPc());
+    return std::format_to(ctx.out(), "fn={}, [{} .. {}]", var.mName, var.StartPc(), var.EndPc());
   }
 };

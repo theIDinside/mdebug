@@ -70,7 +70,7 @@ Frame::FrameId() const noexcept
 int
 Frame::FrameLevel() const noexcept
 {
-  return mFrameLevel;
+  return static_cast<int>(mFrameLevel);
 }
 
 AddrPtr
@@ -124,7 +124,7 @@ Frame::Scopes() noexcept
 {
   // Variable reference can't be 0, so a zero here, means we haven't created the scopes yet
   if (mFrameScopes[0].variables_reference == 0) {
-    for (auto i = 0u; i < 3; ++i) {
+    for (size_t i = 0; i < 3; ++i) {
       mFrameScopes[i].type = static_cast<ui::dap::ScopeType>(i);
       const auto key = Tracer::NewVariablesReference();
       Tracer::SetVariableContext(
@@ -215,7 +215,7 @@ Frame::GetFunctionName() const noexcept
 {
   switch (mFrameType) {
   case FrameType::Full:
-    return mSymbolUnion.uFullSymbol->name;
+    return mSymbolUnion.uFullSymbol->mName;
   case FrameType::ElfSymbol:
     return mSymbolUnion.uMinSymbol->name;
   case FrameType::Unknown:
@@ -296,7 +296,7 @@ CallStack::GetFrameAtLevel(u32 level) noexcept
   if (level >= mStackFrames.size()) {
     return nullptr;
   }
-  return &mStackFrames[0];
+  return mStackFrames.data();
 }
 
 u64
@@ -405,7 +405,7 @@ CallStack::GetCurrent() noexcept
     return { nullptr, nullptr };
   }
   auto span = std::span{ mUnwoundRegister }.subspan(mUnwoundRegister.size() - 2, 2);
-  return { &span[0], &span[1] };
+  return { span.data(), span.data() + 1 };
 }
 
 bool

@@ -183,6 +183,16 @@ public:
   {
     return mData;
   }
+
+  template <typename Index>
+  constexpr auto
+  operator[](Index &&idx) const
+    requires requires(const T &t, Index i) {
+      { t[i] };
+    }
+  {
+    return mData[std::forward<Index>(idx)];
+  }
 };
 
 template <> class Immutable<std::string>
@@ -266,6 +276,12 @@ public:
     }
 
     return std::string_view{ mData }.substr(index + 1);
+  }
+
+  constexpr auto
+  operator[](std::size_t idx) const noexcept
+  {
+    return mData[idx];
   }
 };
 
