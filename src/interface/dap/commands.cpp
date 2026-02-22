@@ -842,23 +842,26 @@ public:
         SourceBreakpointSpec{ .line = line, .column = column, .log_message = std::move(logMessage) }));
     }
 
-    if (auto token = get<std::string_view>(args, kConfigToken); token.has_value()) {
+    // config token is a fallback method. If we're passed a config token, while having a target, ignore it.
+    if (auto token = get<std::string_view>(args, kConfigToken); !target && token.has_value()) {
       // Request sent during configuration phase
       ExecuteDuringConfigPhase(Path{ file }, std::move(specs), get<std::string>(args, kConfigToken));
       return WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::source, {} });
     }
+
     if (!target) {
       TODO("Implement sending error response here, e.g. 'No target with id foo'.");
     }
+
     target->SetSourceBreakpoints(file, specs);
 
-    using BP = ui::dap::Breakpoint;
+    using DAPBreakpoint = ui::dap::Breakpoint;
 
-    auto *breakpoints = Allocate<std::pmr::vector<ui::dap::Breakpoint>>();
+    auto *breakpoints = Allocate<std::pmr::vector<DAPBreakpoint>>();
     for (const auto &[bp, ids] : target->GetUserBreakpoints().GetBreakpointsFromSourceFile(file)) {
       for (const auto id : ids) {
         const auto user = target->GetUserBreakpoints().GetUserBreakpoint(id);
-        breakpoints->push_back(BP::CreateFromUserBreakpoint(*user, MemoryResource()));
+        breakpoints->push_back(DAPBreakpoint::CreateFromUserBreakpoint(*user, MemoryResource()));
       }
     }
     return WriteResponse(
@@ -942,7 +945,8 @@ public:
       specs.insert(BreakpointSpecification::Create<InstructionBreakpointSpec>({}, {}, std::string{ addrString }));
     }
 
-    if (auto token = get<std::string_view>(mArgs, kConfigToken); token.has_value()) {
+    // config token is a fallback method. If we're passed a config token, while having a target, ignore it.
+    if (auto token = get<std::string_view>(mArgs, kConfigToken); !target && token.has_value()) {
       // Request sent during configuration phase
       ExecuteDuringConfigPhase(std::move(specs), get<std::string>(mArgs, kConfigToken));
       return WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::instruction, {} });
@@ -1022,7 +1026,8 @@ public:
         BreakpointSpecification::Create<FunctionBreakpointSpec>({}, {}, std::move(functionName), isRegex));
     }
 
-    if (auto token = get<std::string_view>(mArgs, kConfigToken); token.has_value()) {
+    // config token is a fallback method. If we're passed a config token, while having a target, ignore it.
+    if (auto token = get<std::string_view>(mArgs, kConfigToken); !target && token.has_value()) {
       // Request sent during configuration phase
       ExecuteDuringConfigPhase(std::move(specs), get<std::string>(mArgs, kConfigToken));
       return WriteResponse(SetBreakpointsResponse{ true, this, BreakpointRequestKind::function, {} });

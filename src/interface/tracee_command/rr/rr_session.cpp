@@ -208,7 +208,8 @@ Session::HandleEvent(const ReplayEvent &evt) noexcept
       TaskInfo *task = GetTaskByTid(evt.mTaskInfo.mRecTid);
       HandleBreakpointHit(*task, loc);
     } else {
-      mScheduler->ReplaySchedule(*task, { true, task->mResumeRequest.mType });
+      mScheduler->ReplaySchedule(
+        *task, { .mShouldResumeAfterProcessing = true, .mResumeType = task->mResumeRequest.mType });
     }
   } break;
   case StopKind::Execed: {
@@ -219,8 +220,14 @@ Session::HandleEvent(const ReplayEvent &evt) noexcept
     // this is... ugly. But tell the scheduler to resume first, because otherwise it'll just not do anything
     // if it sees the task as exited. This only happens for rr sessions, since a resume resumes the replay, not an
     // individual task.
-    mScheduler->ReplaySchedule(*task, { true, task->mResumeRequest.mType });
+    DBGLOG(core, "task {} exited...", task->mTid);
+    mScheduler->ReplaySchedule(
+      *task, { .mShouldResumeAfterProcessing = true, .mResumeType = task->mResumeRequest.mType });
     task->SetExited();
+    if (std::ranges::all_of(mThreads, [](const TaskInfoEntry &t) { return t.mTask->mExited; })) {
+      DBGLOG(core, "Marking session {} as dead", mTaskLeader);
+      Tracer::Get().MarkSessionAsDead(mTaskLeader);
+    }
   } break;
   case StopKind::Forked:
     [[fallthrough]];
@@ -228,7 +235,8 @@ Session::HandleEvent(const ReplayEvent &evt) noexcept
     if (!mReplaySupervisor->IsIgnoring(evt.mTaskInfo.mNewTaskIfAny)) {
       HandleFork(*task, evt.mTaskInfo.mNewTaskIfAny, evt.mStopKind == StopKind::VForked);
     } else {
-      mScheduler->ReplaySchedule(*task, { true, task->mResumeRequest.mType });
+      mScheduler->ReplaySchedule(
+        *task, { .mShouldResumeAfterProcessing = true, .mResumeType = task->mResumeRequest.mType });
     }
   } break;
   case StopKind::VForkDone: {
@@ -248,7 +256,8 @@ Session::HandleEvent(const ReplayEvent &evt) noexcept
         CreateStoppedEvent(ui::dap::StoppedReason::Exception, "Signal stop", task->mTid, "Signal received", true));
       break;
     default:
-      mScheduler->ReplaySchedule(*task, { true, task->mResumeRequest.mType });
+      mScheduler->ReplaySchedule(
+        *task, { .mShouldResumeAfterProcessing = true, .mResumeType = task->mResumeRequest.mType });
     }
   } break;
   case StopKind::SyscallEntry: {
@@ -372,6 +381,7 @@ Session::HandleFork(TaskInfo &parentTask, pid_t child, bool vFork) noexcept
   // until first replay step for replay sessions.
   if (!newSupervisor->mRevived) {
     newSupervisor->OnForkCopySymbols(*this, vFork);
+    newSupervisor->mRevived = true;
   }
 
   newSupervisor->AdjustSymbols();
