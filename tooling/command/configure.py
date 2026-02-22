@@ -181,7 +181,7 @@ class DependencyDeclaration:
             return None
 
 
-class SetupProjectCommand(Command):
+class SetupCommand(Command):
     projectDependencies = [
         DependencyDeclaration(
             lib="quickjs",
@@ -210,8 +210,7 @@ class SetupProjectCommand(Command):
         )
     ]
 
-    description = "Setup project and download dependencies."
-    useMessage = f"This command must be run to download & process the dependencies of the project. It will download the following dependencies:\n{"\n".join([f"    - {x.lib}" for x in projectDependencies])}"
+    description = "Setup project by downloading & processing dependencies."
     arguments = [
         Argument(
             name="Directory",
@@ -224,7 +223,9 @@ class SetupProjectCommand(Command):
     hasFixedArguments = True
 
     def __init__(self):
-        super().__init__("dev-setup", commandInstance=self)
+        padding = max(len(x.lib) for x in self.projectDependencies)
+        self.useMessage = f"This command must be run to download & process the dependencies of the project. It will download the following dependencies:\n{"\n".join([f"    - {x.lib:<{padding}} ({x.downloadUrl})" for x in self.projectDependencies])}"
+        super().__init__("setup", commandInstance=self)
 
     def run(self, buildMetadata: BuildMetadata, args):
         downloadDirectory = (
@@ -235,7 +236,7 @@ class SetupProjectCommand(Command):
 
         Path(downloadDirectory).mkdir(parents=True, exist_ok=True)
 
-        for declaration in SetupProjectCommand.projectDependencies:
+        for declaration in SetupCommand.projectDependencies:
             dependency = declaration.download(directory=downloadDirectory)
             if dependency is not None:
                 try:
@@ -340,7 +341,8 @@ class ListPresetsCommand(Command):
         runCommand(cmakeCommand)
 
 
-SetupProjectCommand()
+SetupCommand()
 ConfigureBuildRootCommand()
 ConfigureCommand()
 ListPresetsCommand()
+

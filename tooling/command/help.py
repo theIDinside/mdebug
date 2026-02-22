@@ -20,10 +20,11 @@ class HelpCommand(Command):
 
     def validate(self, buildMetadata: BuildMetadata, args):
         if not args:
-            return
+            return None
         command = Command.registeredCommands.get(args[0])
         if command is None:
             raise ValueError(f"Unknown command {args[0]}")
+        return args[0]
 
     def run(self, buildMetadata: BuildMetadata, args=None):
         if not args:
@@ -33,7 +34,7 @@ class HelpCommand(Command):
             for cmd in Command.registeredCommands.values():
                 print(f"  {cmd.commandName:<25} -- {cmd.description}")
         else:
-            Command.registeredCommands.get(args[0]).usage()
+            Command.registeredCommands.get(args).usage()
             print()
 
 
