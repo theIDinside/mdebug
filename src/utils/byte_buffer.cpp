@@ -1,57 +1,68 @@
 /** LICENSE TEMPLATE */
 #include "byte_buffer.h"
 #include <common.h>
+#include <cstring>
 
 namespace mdb {
 constexpr ByteBuffer::ByteBuffer(std::pmr::memory_resource *allocator, u32 cap) noexcept
-    : capacity(cap), mAllocator(allocator)
+    : mCapacity(cap), mAllocator(allocator)
 {
-  buffer = (u8 *)mAllocator->allocate(cap, 32);
-  value_size = 0;
+  mBuffer = (u8 *)mAllocator->allocate(cap, 32);
+  mSize = 0;
 }
 
 constexpr ByteBuffer::ByteBuffer(std::uint8_t *buffer, u32 cap) noexcept
-    : buffer(buffer), value_size(0), capacity(cap), mAllocator(nullptr)
+    : mBuffer(buffer), mSize(0), mCapacity(cap), mAllocator(nullptr)
 {
 }
 
 u32
-ByteBuffer::size() const noexcept
+ByteBuffer::Write(std::span<const u8> data) noexcept
 {
-  return value_size;
+  const auto dataSize = data.size_bytes();
+  MDB_ASSERT(mSize + dataSize <= mCapacity, "Not enough space in buffer.");
+  std::memcpy(Next(), data.data(), dataSize);
+  WroteBytes(dataSize);
+  return dataSize;
+}
+
+u32
+ByteBuffer::Size() const noexcept
+{
+  return mSize;
 }
 
 void
-ByteBuffer::set_size(u32 new_size) noexcept
+ByteBuffer::SetSize(u32 new_size) noexcept
 {
-  MDB_ASSERT(new_size <= capacity, "Setting size beyond capacity is illogical");
-  value_size = new_size;
+  MDB_ASSERT(new_size <= mCapacity, "Setting size beyond capacity is illogical");
+  mSize = new_size;
 }
 
 void
-ByteBuffer::wrote_bytes(u32 bytes) noexcept
+ByteBuffer::WroteBytes(u32 bytes) noexcept
 {
-  value_size += bytes;
-  MDB_ASSERT(value_size <= capacity, "Recorded size exceeded capacity");
+  mSize += bytes;
+  MDB_ASSERT(mSize <= mCapacity, "Recorded size exceeded capacity");
 }
 
 std::span<u8>
-ByteBuffer::span() const noexcept
+ByteBuffer::Span() const noexcept
 {
-  return std::span{ buffer, value_size };
+  return std::span{ mBuffer, mSize };
 }
 
 u8 *
-ByteBuffer::next() noexcept
+ByteBuffer::Next() noexcept
 {
-  return buffer + value_size;
+  return mBuffer + mSize;
 }
 
 /*static*/
 std::unique_ptr<ByteBuffer>
-ByteBuffer::create(u64 size) noexcept
+ByteBuffer::Create(u64 size) noexcept
 {
-  auto ptr = new u8[size];
+  auto *ptr = new u8[size];
   return std::make_unique<ByteBuffer>(ptr, size);
 }
 

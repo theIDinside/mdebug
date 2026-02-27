@@ -20,9 +20,9 @@ public:
   using OwnPtr = std::unique_ptr<ByteBuffer>;
 
 private:
-  u8 *buffer;
-  u32 value_size;
-  u32 capacity;
+  u8 *mBuffer;
+  u32 mSize;
+  u32 mCapacity;
   std::pmr::memory_resource *mAllocator;
 
 public:
@@ -31,19 +31,20 @@ public:
 
   constexpr ~ByteBuffer() noexcept
   {
-    if (buffer && !mAllocator) {
-      delete[] buffer;
+    if (mBuffer && !mAllocator) {
+      delete[] mBuffer;
     } else {
-      mAllocator->deallocate(buffer, capacity);
+      mAllocator->deallocate(mBuffer, mCapacity);
     }
   }
 
-  u32 size() const noexcept;
-  void set_size(u32 size) noexcept;
-  void wrote_bytes(u32 bytes) noexcept;
-  u8 *next() noexcept;
-  std::span<u8> span() const noexcept;
-  static ByteBuffer::OwnPtr create(u64 size) noexcept;
+  u32 Write(std::span<const u8> data) noexcept;
+  [[nodiscard]] u32 Size() const noexcept;
+  void SetSize(u32 size) noexcept;
+  void WroteBytes(u32 bytes) noexcept;
+  u8 *Next() noexcept;
+  [[nodiscard]] std::span<u8> Span() const noexcept;
+  static ByteBuffer::OwnPtr Create(u64 size) noexcept;
   static ByteBuffer::OwnPtr create(std::pmr::memory_resource *allocator, u64 size) noexcept;
 };
 } // namespace mdb

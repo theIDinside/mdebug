@@ -1325,16 +1325,16 @@ SupervisorState::PostExec(const std::string &exe, bool stopAtEntry, bool install
 mdb::Expected<std::unique_ptr<mdb::ByteBuffer>, NonFullRead>
 SupervisorState::SafeRead(AddrPtr addr, u64 bytes) noexcept
 {
-  auto buffer = mdb::ByteBuffer::create(bytes);
+  auto buffer = mdb::ByteBuffer::Create(bytes);
 
   auto totalRead = 0UL;
   while (totalRead < bytes) {
-    auto res = DoReadBytes(addr, bytes - totalRead, buffer->next());
+    auto res = DoReadBytes(addr, bytes - totalRead, buffer->Next());
     if (!res.WasSuccessful()) {
       return mdb::unexpected(NonFullRead{
         .mBytes = std::move(buffer), .mUnreadBytes = static_cast<u32>(bytes - totalRead), .mErrorNumber = errno });
     }
-    buffer->wrote_bytes(res.uBytesRead);
+    buffer->WroteBytes(res.uBytesRead);
     totalRead += res.uBytesRead;
   }
   return mdb::Expected<std::unique_ptr<mdb::ByteBuffer>, NonFullRead>{ std::move(buffer) };
@@ -1347,12 +1347,12 @@ SupervisorState::SafeRead(std::pmr::memory_resource *allocator, AddrPtr addr, u6
 
   auto totalRead = 0ull;
   while (totalRead < bytes) {
-    auto res = DoReadBytes(addr, bytes - totalRead, buffer->next());
+    auto res = DoReadBytes(addr, bytes - totalRead, buffer->Next());
     if (!res.WasSuccessful()) {
       return mdb::unexpected(NonFullRead{
         .mBytes = std::move(buffer), .mUnreadBytes = static_cast<u32>(bytes - totalRead), .mErrorNumber = errno });
     }
-    buffer->wrote_bytes(res.uBytesRead);
+    buffer->WroteBytes(res.uBytesRead);
     totalRead += res.uBytesRead;
   }
   return mdb::Expected<std::unique_ptr<mdb::ByteBuffer>, NonFullRead>{ std::move(buffer) };
