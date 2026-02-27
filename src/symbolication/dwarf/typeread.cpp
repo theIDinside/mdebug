@@ -13,6 +13,8 @@
 #include <symbolication/type.h>
 #include <utils/logger.h>
 
+#include <algorithm>
+
 namespace mdb::sym::dw {
 
 FunctionSymbolicationContext::FunctionSymbolicationContext(ObjectFile &obj, sym::Frame &frame) noexcept
@@ -177,8 +179,8 @@ FunctionSymbolicationContext::ProcessVariableDie(
       SymbolLocation::UnreadLocationList(static_cast<u32>(state.mLocation->AsUnsignedValue())),
       state.mName->AsCString());
   } else {
-    DataBlock dwarf_expr_block = state.mLocation->AsDataBlock();
-    std::span<const u8> expr{ dwarf_expr_block.ptr, dwarf_expr_block.size };
+    DataBlock dwarfExpressionBlock = state.mLocation->AsDataBlock();
+    std::span<const u8> expr{ dwarfExpressionBlock.ptr, dwarfExpressionBlock.size };
     processedSymbolStack.emplace_back(type, SymbolLocation::Expression(expr), state.mName->AsCString());
   }
   return true;
@@ -278,10 +280,10 @@ TypeSymbolicationContext::ContinueWith(const TypeSymbolicationContext &ctx, Type
 // Fully resolves `Type`
 
 void
-TypeSymbolicationContext::ProcessInheritanceDie(DieReference cu_die) noexcept
+TypeSymbolicationContext::ProcessInheritanceDie(DieReference die) noexcept
 {
-  const auto location = cu_die.ReadAttribute(Attribute::DW_AT_data_member_location);
-  const auto type_id = cu_die.ReadAttribute(Attribute::DW_AT_type);
+  const auto location = die.ReadAttribute(Attribute::DW_AT_data_member_location);
+  const auto type_id = die.ReadAttribute(Attribute::DW_AT_type);
 
   auto containingCompUnitDieReference = mObjectRef.GetDebugInfoEntryReference(type_id->AsUnsignedValue());
   sym::Type *type = mObjectRef.GetTypeStorage()->GetOrCreateNewType(containingCompUnitDieReference->AsIndexed());
@@ -301,7 +303,7 @@ TypeSymbolicationContext::ProcessInheritanceDie(DieReference cu_die) noexcept
 }
 
 static std::string_view
-name_from_tag(DwarfTag tag) noexcept
+NameStringFromTag(DwarfTag tag) noexcept
 {
   switch (tag) {
   case DwarfTag::DW_TAG_class_type:
@@ -413,13 +415,12 @@ TypeDIEContext::operator==(const TypeDIEContext &rhs) const
 }
 
 void
-TypeSymbolicationContext::ProcessMemberVariable(DieReference cu_die) noexcept
+TypeSymbolicationContext::ProcessMemberVariable(DieReference die) noexcept
 {
-  auto location =
-    cu_die.ReadAttribute(Attribute::DW_AT_data_member_location).transform(AttributeValue::AsUnsigned);
+  auto location = die.ReadAttribute(Attribute::DW_AT_data_member_location).transform(AttributeValue::AsUnsigned);
 
-  const auto name = cu_die.ReadAttribute(Attribute::DW_AT_name);
-  const auto typeId = cu_die.ReadAttribute(Attribute::DW_AT_type);
+  const auto name = die.ReadAttribute(Attribute::DW_AT_name);
+  const auto typeId = die.ReadAttribute(Attribute::DW_AT_type);
 
   u32 byteOffset = 0;
   u32 bitFieldOffset = 0;
@@ -427,17 +428,17 @@ TypeSymbolicationContext::ProcessMemberVariable(DieReference cu_die) noexcept
 
   // A member without a location is not a member. It can be a static variable or a constexpr variable.
   if (!location) {
-    const auto bitSize = cu_die.ReadAttribute(Attribute::DW_AT_bit_size).transform(AttributeValue::AsUnsigned);
+    const auto bitSize = die.ReadAttribute(Attribute::DW_AT_bit_size).transform(AttributeValue::AsUnsigned);
     if (!bitSize) {
       DBGLOG(core,
         "cu={}, die 0x{:x} (name={}) is DW_TAG_member but had no location or bit_size",
-        cu_die.GetUnitData()->SectionOffset(),
-        cu_die.GetDie()->mSectionOffset,
+        die.GetUnitData()->SectionOffset(),
+        die.GetDie()->mSectionOffset,
         name.transform([](const auto &v) { return v.AsCString(); }).value_or("die had no name"));
       return;
     }
     const auto dataBitOffset =
-      cu_die.ReadAttribute(Attribute::DW_AT_data_bit_offset).transform(AttributeValue::AsUnsigned);
+      die.ReadAttribute(Attribute::DW_AT_data_bit_offset).transform(AttributeValue::AsUnsigned);
     if (!dataBitOffset) {
       return;
     }
@@ -448,8 +449,8 @@ TypeSymbolicationContext::ProcessMemberVariable(DieReference cu_die) noexcept
 
   MDB_ASSERT(typeId,
     "Expected to find type attribute for die 0x{:x} ({})",
-    cu_die.GetDie()->mSectionOffset,
-    to_str(cu_die.GetDie()->mTag));
+    die.GetDie()->mSectionOffset,
+    to_str(die.GetDie()->mTag));
 
   byteOffset = (*location);
 
@@ -460,7 +461,7 @@ TypeSymbolicationContext::ProcessMemberVariable(DieReference cu_die) noexcept
       "Failed to get compilation unit & die reference from DIE offset: 0x{:x}",
       typeId->AsUnsignedValue());
     sym::Type *type = mObjectRef.GetTypeStorage()->GetOrCreateNewType(containingCompUnitDieReference->AsIndexed());
-    auto name = name_from_tag(type->mDebugInfoEntryTag);
+    auto name = NameStringFromTag(type->mDebugInfoEntryTag);
     this->mTypeFields.push_back(Field{ .mType = NonNull(*type),
       .mObjectBaseOffset = byteOffset,
       .mFieldOffset = bitFieldOffset,
@@ -482,13 +483,13 @@ TypeSymbolicationContext::ProcessMemberVariable(DieReference cu_die) noexcept
 }
 
 void
-TypeSymbolicationContext::ProcessEnumDie(DieReference compUnitDie) noexcept
+TypeSymbolicationContext::ProcessEnumDie(DieReference die) noexcept
 {
-  const auto name = compUnitDie.ReadAttribute(Attribute::DW_AT_name);
-  const auto memberOffset = compUnitDie.ReadAttribute(Attribute::DW_AT_data_member_location)
+  const auto name = die.ReadAttribute(Attribute::DW_AT_name);
+  const auto memberOffset = die.ReadAttribute(Attribute::DW_AT_data_member_location)
                               .transform([](const auto &v) { return v.AsUnsignedValue(); })
                               .value_or(0);
-  const auto const_value = compUnitDie.ReadAttribute(Attribute::DW_AT_const_value);
+  const auto const_value = die.ReadAttribute(Attribute::DW_AT_const_value);
   if (const_value) {
     mEnumIsSigned = const_value->form == AttributeForm::DW_FORM_sdata;
     if (mEnumIsSigned) {
@@ -498,11 +499,65 @@ TypeSymbolicationContext::ProcessEnumDie(DieReference compUnitDie) noexcept
     }
   }
 
-  this->mTypeFields.push_back(Field{ .mType = NonNull(*mEnumerationType),
+  mTypeFields.push_back(Field{ .mType = NonNull(*mEnumerationType),
     .mObjectBaseOffset = memberOffset,
     .mFieldOffset = 0,
     .mBitFieldSize = 0,
     .mName = name->AsCString() });
+}
+
+void
+TypeSymbolicationContext::ProcessTemplateParameter(DieReference die, bool isValue) noexcept
+{
+  const auto name = die.ReadAttribute(Attribute::DW_AT_name);
+  const auto typeId = die.ReadAttribute(Attribute::DW_AT_type);
+
+  auto containingCompUnitDieReference = mObjectRef.GetDebugInfoEntryReference(typeId->AsUnsignedValue());
+  MDB_ASSERT(containingCompUnitDieReference.has_value(),
+    "Failed to get compilation unit & die reference from DIE offset: 0x{:x}",
+    typeId->AsUnsignedValue());
+  sym::Type *type = mObjectRef.GetTypeStorage()->GetOrCreateNewType(containingCompUnitDieReference->AsIndexed());
+
+  auto &templateArg = mTemplateArguments.emplace_back(name->AsStringView(), type);
+
+  if (isValue) {
+    const auto value = die.ReadAttribute(Attribute::DW_AT_const_value);
+    if (value) {
+
+      using enum AttributeForm;
+      // mdb treats all constants as either u64 or i64, scaling up the value from 1->8 bytes
+      switch (value->form) {
+      case DW_FORM_data1:
+      case DW_FORM_data2:
+      case DW_FORM_data4:
+      case DW_FORM_data8:
+      case DW_FORM_udata: {
+        u64 unsignedVal = value->AsUnsignedValue();
+        templateArg.mConstValueBytes.resize(sizeof(u64));
+        std::memcpy(templateArg.mConstValueBytes.data(), &unsignedVal, sizeof(u64));
+        break;
+      }
+      case DW_FORM_sdata: {
+        i64 signedVal = value->AsSignedValue();
+        templateArg.mConstValueBytes.resize(sizeof(i64));
+        std::memcpy(templateArg.mConstValueBytes.data(), &signedVal, sizeof(i64));
+        break;
+      }
+      case DW_FORM_block:
+      case DW_FORM_block1:
+      case DW_FORM_block2:
+      case DW_FORM_block4: {
+        DataBlock block = value->AsDataBlock();
+        templateArg.mConstValueBytes.resize(block.size);
+        std::memcpy(templateArg.mConstValueBytes.data(), block.ptr, block.size);
+        break;
+      }
+      default:
+        templateArg.mConstValueBytes = {};
+        break;
+      }
+    }
+  }
 }
 
 void
@@ -592,6 +647,11 @@ TypeSymbolicationContext::ResolveType() noexcept
       case DwarfTag::DW_TAG_enumerator:
         ProcessEnumDie(DieReference{ cu, &die });
         break;
+      case DwarfTag::DW_TAG_template_type_parameter:
+        [[fallthrough]];
+      case DwarfTag::DW_TAG_template_value_parameter:
+        ProcessTemplateParameter(DieReference{ cu, &die }, die.mTag == DwarfTag::DW_TAG_template_value_parameter);
+        break;
       default:
         continue;
       }
@@ -600,11 +660,15 @@ TypeSymbolicationContext::ResolveType() noexcept
     if (typedie.GetDie()->mTag == DwarfTag::DW_TAG_enumeration_type) {
       typeIter->mEnumValues = { .mIsSigned = mEnumIsSigned,
         .mEnumeratorValues = std::make_unique<EnumeratorConstValue[]>(mTypeFields.size()) };
-      std::copy(mConstValues.begin(), mConstValues.end(), typeIter->mEnumValues.mEnumeratorValues.get());
+      std::ranges::copy(mConstValues, typeIter->mEnumValues.mEnumeratorValues.get());
     }
 
     if (!mTypeFields.empty()) {
-      std::swap(typeIter->mFields, this->mTypeFields);
+      std::swap(typeIter->mFields, mTypeFields);
+    }
+
+    if (!mTemplateArguments.empty()) {
+      std::swap(typeIter->mTemplateTypes, mTemplateArguments);
     }
     typeIter->mIsResolved = true;
     typeIter = typeIter->mTypeChain;

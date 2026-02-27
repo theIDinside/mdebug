@@ -58,7 +58,6 @@ ProcessDie(DieReference dieRef, Fn &&fn) noexcept
     switch (fn(reader, attribute, attrs)) {
     case DieAttributeRead::Continue:
       break;
-      ;
     case DieAttributeRead::Skipped:
       reader.SkipAttribute(attribute);
       break;

@@ -9,6 +9,7 @@
 #include <symbolication/dwarf_attribute_value.h>
 #include <symbolication/dwarf_defs.h>
 #include <symbolication/objfile.h>
+#include <utils/todo.h>
 
 // std
 #include <algorithm>
@@ -555,6 +556,16 @@ Type::IsArrayType() const noexcept
   return t->mModifier == Modifier::Array;
 }
 
+TemplateParameter *
+Type::TemplateTypeParameter(size_t index)
+{
+  if (index >= mTemplateTypes.size()) {
+    return nullptr;
+  }
+
+  return mTemplateTypes.data() + index;
+}
+
 u32
 Type::MembersCount() noexcept
 {
@@ -563,11 +574,24 @@ Type::MembersCount() noexcept
 }
 
 std::span<const Field>
+Type::GetMemberFields() noexcept
+{
+  return mFields;
+}
+
+std::span<const Field>
 Type::MemberFields() noexcept
 {
   MDB_ASSERT(mIsResolved, "Type is not fully resolved!");
   auto t = GetTargetType();
   return t->mFields;
+}
+
+std::span<const TemplateParameter>
+Type::TemplateParameters() noexcept
+{
+  MDB_ASSERT(mIsResolved, "Type is not fully resolved!");
+  return mTemplateTypes;
 }
 
 Type *

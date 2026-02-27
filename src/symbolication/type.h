@@ -324,6 +324,21 @@ struct EnumeratorValues
   std::unique_ptr<EnumeratorConstValue[]> mEnumeratorValues{ nullptr };
 };
 
+struct TemplateParameter
+{
+  std::string_view mName;
+  Type *mType;
+  std::vector<u8> mConstValueBytes;
+
+  [[nodiscard]] constexpr bool
+  IsTemplateValueParameter() const
+  {
+    return !mConstValueBytes.empty();
+  }
+};
+
+using TemplateArguments = std::vector<TemplateParameter>;
+
 // This is meant to be the interface via which we interpret a range of bytes
 class Type
 {
@@ -347,6 +362,7 @@ private:
   friend class TypeSymbolicationContext;
   Type *mTypeChain;
   std::vector<Field> mFields;
+  std::vector<TemplateParameter> mTemplateTypes;
 
   // A disengaged optional, means this type does *not* represent one of the primitives (what DWARF calls "base
   // types").
@@ -401,7 +417,7 @@ public:
   std::optional<BaseTypeEncoding> GetBaseTypeIfPrimitive() const noexcept;
   bool IsCharType() const noexcept;
   bool IsArrayType() const noexcept;
-  Type NextTypeEntry() const noexcept;
+  TemplateParameter *TemplateTypeParameter(size_t index);
 
   DwarfTag
   GetDwarfTag() const noexcept
@@ -419,7 +435,9 @@ public:
   u32 SizeBytes() noexcept;
 
   u32 MembersCount() noexcept;
+  std::span<const Field> GetMemberFields() noexcept;
   std::span<const Field> MemberFields() noexcept;
+  std::span<const TemplateParameter> TemplateParameters() noexcept;
   Type *TypeDescribingLayoutOfThis() noexcept;
   // Todo: refactor this so we don't have to set it manually. It's ugly. It's easy to make it error prone.
   void SetArrayBounds(u32 bounds) noexcept;

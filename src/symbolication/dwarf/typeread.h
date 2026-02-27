@@ -71,6 +71,7 @@ class TypeSymbolicationContext
 
   // The currently built state for resolving the type we're building.
   std::vector<Field> mTypeFields;
+  TemplateArguments mTemplateArguments;
   // The type being built
   sym::Type *mRequestedTypeDieToResolve;
   sym::Type *mEnumerationType{ nullptr };
@@ -80,6 +81,7 @@ class TypeSymbolicationContext
   void ProcessMemberVariable(DieReference die) noexcept;
   void ProcessInheritanceDie(DieReference die) noexcept;
   void ProcessEnumDie(DieReference die) noexcept;
+  void ProcessTemplateParameter(DieReference die, bool isValue) noexcept;
 
   void ResolveDeclarationType(sym::Type *type);
 
