@@ -95,7 +95,7 @@ public:
   // Can (possibly) modify state in `t`
   TaskExecuteResponse StopTask(TaskInfo &t) noexcept final;
   void DoResumeTask(TaskInfo &t, RunType type) noexcept final;
-  bool DoResumeTarget(RunType type) noexcept final;
+  bool DoResumeTarget(RunType type, bool forceResume) noexcept final;
   bool Pause(Tid tid) noexcept final;
   bool CanContinue() noexcept final;
 };

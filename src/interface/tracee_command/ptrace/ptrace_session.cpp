@@ -53,6 +53,17 @@ ToPtrace(RunType runtype)
   }
 }
 
+std::expected<Pid, int>
+GetClonePid(Pid cloningTaskTid)
+{
+  Pid child = 0;
+  auto result = ::ptrace(PTRACE_GETEVENTMSG, cloningTaskTid, nullptr, &child);
+  if (result == -1) {
+    return std::unexpected(errno);
+  }
+  return child;
+}
+
 static StopStatus
 IfSignalledToStopStatus(PtraceEvent event) noexcept
 {
@@ -170,7 +181,6 @@ Session::ProcessQueuedUnhandled(Pid childPid) noexcept
   auto it = std::ranges::find_if(
     sUnhandledPtraceEvents, [tid = childPid](const PtraceEvent &event) { return event.mPid == tid; });
   if (it != std::end(sUnhandledPtraceEvents)) {
-    DBGBUFLOG(core, "processing queued event for {}", childPid);
     PtraceEvent e = *it;
     sUnhandledPtraceEvents.erase(it);
     auto *task = GetTaskByTid(childPid);
@@ -361,10 +371,14 @@ Session::DoResumeTask(TaskInfo &t, RunType runType) noexcept
 }
 
 bool
-Session::DoResumeTarget(RunType type) noexcept
+Session::DoResumeTarget(RunType type, bool forceResume) noexcept
 {
   u32 resumed = 0;
   for (auto &t : mThreads) {
+    if (forceResume && !t.mTask->CanContinue()) {
+      t.mTask->SetAtTraceEventStop();
+    }
+
     if (t.mTask->CanContinue()) {
       t.mTask->SetResumeType(type);
       mScheduler->Schedule(*t.mTask, { .mShouldResumeAfterProcessing = true });
@@ -700,9 +714,9 @@ Session::HandleEvent(TaskInfo &task, StopStatus stopStatus) noexcept
   case StopKind::Forked:
     [[fallthrough]];
   case StopKind::VForked: {
-    Tid childPid = 0;
-    auto result = ::ptrace(PTRACE_GETEVENTMSG, task.mTid, nullptr, &childPid);
-    MDB_ASSERT(result != -1, "Failed to get new pid for forked child; {}", strerror(errno));
+    auto res = GetClonePid(task.mTid);
+    MDB_ASSERT(res.has_value(), "Failed to get new pid for forked child; {}", strerror(res.error()));
+    Tid childPid = *res;
     DBGLOG(core, "[v|fork]: new process after fork {}", childPid);
     HandleFork(task, childPid, stopStatus.ws == StopKind::VForked);
   } break;
@@ -710,14 +724,16 @@ Session::HandleEvent(TaskInfo &task, StopStatus stopStatus) noexcept
     TODO("WaitStatusKind::VForkDone");
     break;
   case StopKind::Cloned: {
-    auto childPid = NativeInitCloneEvent(task, GetUpToDateRegisterCache(task.mTid)->mUser, *this);
+    auto res = GetClonePid(task.mTid);
+    MDB_ASSERT(res.has_value(), "Failed to get new child pid: {}", strerror(*res));
+    const Pid clonedChildPid = *res;
     std::string threadName;
-    if (!ReadThreadName(childPid, threadName) && !ReadThreadName(mTaskLeader, threadName)) {
+    if (!ReadThreadName(clonedChildPid, threadName) && !ReadThreadName(mTaskLeader, threadName)) {
       threadName = "???";
     }
-    CreateNewTask(childPid, threadName);
-    mScheduler->Schedule(task, { true, task.mResumeRequest.mType });
-    ProcessQueuedUnhandled(childPid);
+    CreateNewTask(clonedChildPid, threadName);
+    mScheduler->Schedule(task, { .mShouldResumeAfterProcessing = true, .mResumeType = task.mResumeRequest.mType });
+    ProcessQueuedUnhandled(clonedChildPid);
   } break;
   case StopKind::Signalled: {
     if (stopStatus.mIsTerminatingEvent) {
@@ -810,7 +826,10 @@ Session::HandleFork(TaskInfo &parentTask, pid_t newChild, bool vFork) noexcept
         uninstalledBreakpointLocations.insert(loc->Address());
       }
     }
-    newSupervisor->mStopEventHandlerStack.PushEventHandler([](const auto &) { return EventState::Defer; });
+    newSupervisor->mStopEventHandlerStack.PushEventHandler([](const auto &) {
+      DBGLOG(control, "Event handler is deferring...");
+      return EventState::Defer;
+    });
     newSupervisor->OpenMemoryFile();
 
     mDebugAdapterClient->PostDapEvent(new ui::dap::Process{ mTaskLeader, newChild, "forked", true });

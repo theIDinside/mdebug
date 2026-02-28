@@ -30,7 +30,7 @@ struct JsSupervisor : public JSBinding<JsSupervisor, tc::SupervisorState, Javasc
       FunctionEntry("id", 0, &Id),
       FunctionEntry("toString", 0, &ToString),
       FunctionEntry("breakpoints", 0, &Breakpoints),
-      FunctionEntry("resumeAll", 0, &ResumeAll),
+      FunctionEntry("resumeAll", 1, &ResumeAll),
       ToStringTag("Supervisor")
     };
     return funcs;

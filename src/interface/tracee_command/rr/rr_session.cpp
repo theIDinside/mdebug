@@ -893,7 +893,7 @@ Session::DoResumeTask([[maybe_unused]] TaskInfo &t, RunType runType) noexcept
 }
 
 bool
-Session::DoResumeTarget(RunType runType) noexcept
+Session::DoResumeTarget(RunType runType, bool forceResume) noexcept
 {
   mdbrr::ResumeReplay resumeReplay{
     .resume_type = mdbrr::ResumeType::RR_RESUME, .direction = mdbrr::ReplayDirection::RR_DIR_FORWARD, .steps = 1

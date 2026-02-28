@@ -384,7 +384,7 @@ struct Continue final : public ui::UICommand
     DBGLOG(control, "user requested resume, all={}, thread={}", mContinueAll, mThreadId);
 
     if (mContinueAll || !target->SingleThreadControl()) {
-      target->ResumeTarget(tc::RunType::Continue);
+      target->ResumeTarget(tc::RunType::Continue, false);
       success = true;
     } else {
       TaskInfo *task = target->GetTaskByTid(mThreadId);
@@ -1492,8 +1492,6 @@ struct NativeLaunch final : public Launch
     tc::ptrace::Session *process = tc::ptrace::Session::ForkExec(
       mDebugAdapterManager, mStopOnEntry, mProgram, mProgramArgs, mBreakpointBehavior);
 
-    mDebugAdapterManager->ConnectConfigToken(process->TaskLeaderTid(), mConfigToken);
-
     // Queue a pseudo stop event that will force a start during configurationDone by processing deferred events.
     process->QueuePending(StopStatus{ .ws = StopKind::Stopped, .mPid = process->TaskLeaderTid(), .uSignal = 0 });
     WriteResponse(LaunchResponse{ process->TaskLeaderTid(), true, this });
@@ -1717,7 +1715,14 @@ struct Attach final : public UICommand
 {
   static constexpr auto kSessionType = "sessionType"sv;
 
-  Attach(UICommandArg arg, AttachArgs args) noexcept : UICommand{ std::move(arg) }, attachArgs{ args } {}
+  Attach(UICommandArg arg,
+    std::string_view configToken,
+    AttachArgs args,
+    std::function<void(tc::SupervisorState &)> &&configRequest) noexcept
+      : UICommand{ std::move(arg) }, attachArgs{ args }, mConfigToken(configToken),
+        mConfigRequest(std::move(configRequest))
+  {
+  }
 
   ~Attach() override = default;
 
@@ -1725,10 +1730,20 @@ struct Attach final : public UICommand
   Execute() noexcept final
   {
     auto *supervisor = Tracer::Get().SessionAttach(attachArgs);
+
+    SupervisorSessionConfiguration *config = mDebugAdapterManager->GetConfigurationFor(mConfigToken);
+
     WriteResponse(AttachResponse{ supervisor->GetProcessId(), true, this });
+
+    // As the last config request, we start processing deferred ptrace events, effectively "starting" the debug
+    // session
+    config->AddConfigurationRequest(std::move(mConfigRequest));
+    config->OnLaunch({ supervisor });
   }
 
   AttachArgs attachArgs;
+  std::string_view mConfigToken;
+  std::function<void(tc::SupervisorState &)> mConfigRequest;
   DEFINE_NAME("attach");
   RequiredArguments({ kSessionType });
 
@@ -1763,9 +1778,17 @@ struct Attach final : public UICommand
       return RefPtr<ui::dap::InvalidArgs>::MakeShared(std::move(arg), "attach", std::move(invalid));
     }
 
+    auto configTokenValue = get<std::string_view>(args, kConfigToken);
+    MDB_ASSERT(configTokenValue.has_value(), "configToken field missing from AttachRequest");
+
     Pid processId = static_cast<Pid>(*args.Get("processId")->GetNumber());
     MDB_ASSERT(processId > 0, "Expect a process id > 0 (technically 1 too, since it's systemd)");
-    return RefPtr<Attach>::MakeShared(std::move(arg), PtraceAttachArgs{ processId });
+    return RefPtr<Attach>::MakeShared(
+      std::move(arg), *configTokenValue, PtraceAttachArgs{ processId }, [](tc::SupervisorState &process) {
+        auto &supervisor = static_cast<tc::ptrace::Session &>(process);
+        supervisor.ProcessDeferredEvents();
+        supervisor.ProcessQueuedUnhandled(supervisor.TaskLeaderTid());
+      });
   }
 
   static RefPtr<ui::UICommand>
@@ -1782,6 +1805,7 @@ struct Attach final : public UICommand
     if (type == kSessionTypeGdbRemote) {
       TODO("Removed gdb support, not priority");
     }
+
     std::vector<InvalidArg> invalid{};
     invalid.emplace_back(ArgumentError::Invalid("invalid session type"), "sessionType"sv);
     return RefPtr<ui::dap::InvalidArgs>::MakeShared(std::move(arg), "attach", std::move(invalid));

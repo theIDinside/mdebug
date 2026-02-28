@@ -65,11 +65,16 @@ JsSupervisor::Breakpoints(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCo
 
 /* static */
 JSValue
-JsSupervisor::ResumeAll(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv))
+JsSupervisor::ResumeAll(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv)
 {
   auto *supervisor = GetThisOrReturnException(supervisor, OpaqueDataErrorMessage);
 
-  supervisor->ResumeTarget(tc::RunType::Continue);
+  if (argCount > 0 && !JS_IsBool(argv[0])) {
+    return JS_ThrowTypeError(cx, "Optional argument must be a boolean");
+  }
+
+  const bool forceResume = argCount > 0 ? JS_ToBool(cx, argv[0]) : false;
+  supervisor->ResumeTarget(tc::RunType::Continue, forceResume);
   return JS_UNDEFINED;
 }
 

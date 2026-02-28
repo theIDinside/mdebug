@@ -176,7 +176,7 @@ class DebugAdapterManager;
 enum class ConfigureState : u8
 {
   Initialized,
-  Launched,
+  LaunchedOrAttached,
   Configured,
   Completed
 };
@@ -212,10 +212,6 @@ class DebugAdapterManager
   int mTtyFileDescriptor{ -1 };
 
   std::vector<tc::SupervisorState *> mSupervisors;
-  // Callback for configuration phase to be executed when an actual supervisor has materialized
-  // (which happens after a launch or attach). For processes that got spawed by the target, while debugging,
-  // the configuration phase will work on the first try, since there's a materialized session to target.
-  StringMap<Pid> mConfigTokenToProcessId;
   StringMap<std::unique_ptr<SupervisorSessionConfiguration>> mSessionConfigurations;
 
   // The allocator that can be used by commands during execution of them, for temporary objects etc
@@ -258,12 +254,6 @@ public:
 
   int ReadFileDescriptor() const noexcept;
   int WriteFileDescriptor() const noexcept;
-
-  void
-  ConnectConfigToken(Pid processId, std::string_view configToken) noexcept
-  {
-    mConfigTokenToProcessId[std::string{ configToken }] = processId;
-  }
 
   bool WriteSerializedProtocolMessage(std::string_view output) const noexcept;
   void ReadPendingCommands() noexcept;

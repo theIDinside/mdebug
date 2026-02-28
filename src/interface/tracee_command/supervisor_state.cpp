@@ -324,11 +324,11 @@ SupervisorState::HasTask(Tid tid) noexcept
 }
 
 bool
-SupervisorState::ResumeTarget(tc::RunType resumeType) noexcept
+SupervisorState::ResumeTarget(tc::RunType resumeType, bool forceResume) noexcept
 {
   DBGLOG(core, "[supervisor]: resume tracee {}", resumeType);
   mScheduler->SetNormalScheduling();
-  return DoResumeTarget(resumeType);
+  return DoResumeTarget(resumeType, forceResume);
 }
 
 void

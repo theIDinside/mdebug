@@ -458,7 +458,7 @@ SupervisorSessionConfiguration::OnLaunch(NonNullPtr<tc::SupervisorState> supervi
     Complete();
     break;
   default:
-    mConfigureState = ConfigureState::Launched;
+    mConfigureState = ConfigureState::LaunchedOrAttached;
     break;
   }
 
@@ -469,7 +469,7 @@ ConfigureState
 SupervisorSessionConfiguration::OnConfigurationDone()
 {
   switch (mConfigureState) {
-  case ConfigureState::Launched:
+  case ConfigureState::LaunchedOrAttached:
     Complete();
     break;
   default:

@@ -111,7 +111,7 @@ public:
   // Can (possibly) modify state in `t`
   TaskExecuteResponse StopTask(TaskInfo &t) noexcept final;
   void DoResumeTask(TaskInfo &t, RunType type) noexcept final;
-  bool DoResumeTarget(RunType type) noexcept final;
+  bool DoResumeTarget(RunType type, bool forceResume) noexcept final;
   bool ReverseResumeTarget(tc::RunType type) noexcept final;
   bool Pause(Tid tid) noexcept final;
   mdb::ui::dap::StoppedEvent *CreateStoppedEvent(ui::dap::StoppedReason reason,

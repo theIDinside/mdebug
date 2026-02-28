@@ -313,7 +313,7 @@ public:
   bool HasTask(Tid tid) noexcept;
 
   /* Resumes all tasks in this target. */
-  bool ResumeTarget(tc::RunType type) noexcept;
+  bool ResumeTarget(tc::RunType type, bool forceResume) noexcept;
   /* Resumes `task`, which can involve a process more involved than just calling ptrace. */
   void ResumeTask(TaskInfo &task, tc::RunType type) noexcept;
   /* Interrupts/stops all threads in this process space */
@@ -526,7 +526,7 @@ public:
   // Can (possibly) modify state in `t`
   virtual TaskExecuteResponse StopTask(TaskInfo &t) noexcept = 0;
   virtual void DoResumeTask(TaskInfo &t, RunType type) noexcept = 0;
-  virtual bool DoResumeTarget(RunType type) noexcept = 0;
+  virtual bool DoResumeTarget(RunType type, bool forceResume) noexcept = 0;
   virtual bool ReverseResumeTarget(tc::RunType type) noexcept;
   virtual mdb::ui::dap::StoppedEvent *CreateStoppedEvent(ui::dap::StoppedReason reason,
     std::string_view description,
