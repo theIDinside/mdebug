@@ -226,10 +226,17 @@ Logger::ConfigureLogging(const mdb::cfg::InitializationConfiguration &config) no
   // all log channels. Need to integrate this into the test suite as well as the vscode extension so that
   // environment variables are properly set.
   const auto &channels = config.mLogChannels;
+
+#if defined(MDB_BINARY_LOGGING)
+  // Configure binary logging
+  logging::InitializeBinaryLogging(config);
+#else
+  // Configure text logging
   DBGLOG(core, "channels set: {}", channels.size());
   for (auto channel : Enum<Channel>::Variants()) {
     sLoggerInstance->SetupChannel(config.mLogDirectory, channel);
   }
+#endif
 
   ProfilingLogger::ConfigureProfiling(config.mLogDirectory);
 }

@@ -309,6 +309,22 @@ private:
 Logger *GetLogger() noexcept;
 LogChannel *GetLogChannel(Channel id) noexcept;
 
+} // namespace mdb::logging
+
+// Binary logging support
+#if defined(MDB_BINARY_LOGGING)
+
+#include <utils/binlog_integration.h>
+
+// When binary logging is enabled, redirect all log macros to BINLOG
+#define DBGLOG BINLOG
+#define DBGBUFLOG BINLOG
+#define CDLOG(condition, channel, ...) \
+  if ((condition)) { BINLOG(channel, __VA_ARGS__); }
+#define DBGLOG_STR(channel, str) BINLOG(channel, "{}", str)
+
+#else  // Text logging (original implementation)
+
 #if defined(MDB_DEBUG) and MDB_DEBUG == 1
 
 // CONDITIONAL DEBUG LOG
@@ -357,7 +373,7 @@ LogChannel *GetLogChannel(Channel id) noexcept;
   }
 #endif
 
-} // namespace mdb::logging
+#endif  // MDB_BINARY_LOGGING
 
 using PEArg = mdb::logging::ProfileEventArg;
 

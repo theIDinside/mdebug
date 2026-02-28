@@ -192,6 +192,12 @@ public:
     return TraceePointer{ nullptr };
   }
 
+  [[nodiscard]] constexpr auto
+  value() const noexcept
+  {
+    return mRemoteAddress;
+  }
+
 private:
   std::uintptr_t mRemoteAddress;
 };

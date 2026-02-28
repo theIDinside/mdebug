@@ -95,7 +95,7 @@ UnitDataTask::ExecuteTask(std::pmr::memory_resource *) noexcept
     UnitReader reader{ dwarfUnit };
 
     if (dwarfUnit->GetHeader().GetUnitType() == DwarfUnitType::DW_UT_partial) {
-      DBGLOG(dwarf, "partial unit supported not implemented, skipped {}", dwarfUnit->SectionOffset());
+      DBGLOG(dwarf, "partial unit supported not implemented, skipped {}", dwarfUnit->SectionOffset().value());
       continue;
     }
 

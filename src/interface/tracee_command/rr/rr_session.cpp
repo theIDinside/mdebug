@@ -550,7 +550,7 @@ Session::UpdateSourceBreakpoints(const std::filesystem::path &sourceFilePath,
     sourceCodeFile->mFullPath.FileName(),                                                                         \
     u32{ user->mId },                                                                                             \
     pc,                                                                                                           \
-    user->GetLocation(),                                                                                          \
+    std::format("{}", user->GetLocation()),                                                                       \
     e.FormatUsingFile(sourceCodeFile->mFullPath));                                                                \
   addIdToSpec(user->mId);
 

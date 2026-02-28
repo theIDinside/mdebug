@@ -2495,14 +2495,14 @@ ValidateRequestFormat(const mdbjson::JsonValue &req) noexcept
   const auto missingFields = req.Contains("command") && req.Contains("type") && req.Contains("seq") &&
                              req.Contains("arguments") && req.Contains(kProcessId);
   if (!missingFields) {
-    DBGLOG(core, "Request missing fields. Request: {}", req);
+    DBGLOG(core, "Request missing fields. Request: {}", std::format("{}", req));
     return false;
   }
 
   const auto correctTypes = req["command"]->IsString() && req["seq"]->IsNumber() && req[kProcessId]->IsNumber();
 
   if (!correctTypes) {
-    DBGLOG(dap, "Base protocol request fields of incorrect type. Request: {}", req);
+    DBGLOG(dap, "Base protocol request fields of incorrect type. Request: {}", std::format("{}", req));
     return false;
   }
 
@@ -2531,7 +2531,7 @@ ParseDebugAdapterCommand(DebugAdapterManager &client, std::string_view packet) n
     return nullptr;
   }
 
-  DBGLOG(dap, "parsed request: {}", obj);
+  DBGLOG(dap, "parsed request: {}", std::format("{}", obj));
   std::string_view commandName = obj["command"];
 
   arg.mSeq = obj["seq"];

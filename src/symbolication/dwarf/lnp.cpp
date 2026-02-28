@@ -590,7 +590,7 @@ read_lnp_headers(ObjectFile *objectFile) noexcept
       DBGLOG(core,
         "WARNING: Line number program header of unsupported version: {} at offset 0x{:x}",
         version,
-        reader.BytesRead())
+        reader.BytesRead());
       reader.Skip(init_len);
       continue;
     case 4:

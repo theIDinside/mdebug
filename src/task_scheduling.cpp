@@ -480,7 +480,7 @@ TaskScheduler::NormalScheduleTask(TaskInfo &task, bool shouldResume) noexcept
       "{}.{} has exited, process exited={}",
       mSupervisor->TaskLeaderTid(),
       task.mTid,
-      mSupervisor->IsExited())
+      mSupervisor->IsExited());
     return;
   }
 

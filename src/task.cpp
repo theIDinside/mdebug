@@ -282,7 +282,7 @@ TaskInfo::StepOverBreakpoint() noexcept
   DBGBUFLOG(control,
     "Task {} stepping over bps {} at {}",
     mTid,
-    JoinFormatIterator{ userBreakpointIds, ", " },
+    userBreakpointIds.front(),
     mBreakpointLocationStatus.mBreakpointLocation->Address());
 
   mBreakpointLocationStatus.mBreakpointLocation->Disable(mTid, *mSupervisor);

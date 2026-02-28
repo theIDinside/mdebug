@@ -338,7 +338,7 @@ CompilationUnit::SetAddressBoundary(AddrPtr lowest, AddrPtr end_exclusive) noexc
 {
   DBGLOG(dwarf,
     "cu={} low_pc={} .. {} ({})",
-    mUnitData->SectionOffset(),
+    mUnitData->SectionOffset().value(),
     lowest,
     end_exclusive,
     mUnitData->GetObjectFile()->GetFilePath().filename().c_str());

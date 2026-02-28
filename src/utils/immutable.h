@@ -193,6 +193,12 @@ public:
   {
     return mData[std::forward<Index>(idx)];
   }
+
+  constexpr auto
+  value() const noexcept
+  {
+    return mData;
+  }
 };
 
 template <> class Immutable<std::string>

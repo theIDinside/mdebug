@@ -18,8 +18,15 @@ option(BUILD_MDB_TESTS "Setting that configures & builds test subjects" OFF)
 option(CLANG_TIDY_CHECK "Configure clang-tidy to run during build" OFF)
 option(MDB_PROFILE_LOGGER "Configure mdb to build with profile logging" OFF)
 
+# Binary logging is an experiemental feature. Expect crashing and hanging.
+option(MDB_BINARY_LOGGING "Use binary logging instead of text logging" OFF)
+
 find_package(PkgConfig REQUIRED)
 string(TOUPPER ${CMAKE_BUILD_TYPE} MIDAS_BUILD_TYPE)
+
+if(MDB_BINARY_LOGGING)
+  add_subdirectory(lib/binlog)
+endif()
 
 include(cmake/StageRR.cmake)
 
@@ -272,6 +279,50 @@ message("Build type for project: ${CMAKE_BUILD_TYPE}")
 # Generate syscalls.def
 execute_process(COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/generate/syscalls.py WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
+# Binary logging scans source tree for log calls and build ID's to string format strings and log calls
+# and logs the binary data by just writing the bytes, no formatting. *Minor* serialization helper
+# in so far that if a type T has a value() method that produces a primitive or a convertible to std::string_view
+# this will be called and used as value for the output. This should be a lot faster than heap allocation and std::formatting etc
+if(MDB_BINARY_LOGGING)
+  # Write source files to a temporary file for the indexer script
+  set(SOURCES_LIST_FILE "${CMAKE_CURRENT_BINARY_DIR}/sources_for_indexer.txt")
+  set(LOG_FORMATS_DEF "${CMAKE_CURRENT_SOURCE_DIR}/src/defs/log_formats.def")
+  set(LOG_FORMAT_MAP_H "${CMAKE_CURRENT_SOURCE_DIR}/src/utils/log_format_map.h")
+
+  # Write sources list file at configure time
+  file(WRITE ${SOURCES_LIST_FILE} "")
+  foreach(source ${MIDAS_SOURCES})
+    file(APPEND ${SOURCES_LIST_FILE} "${CMAKE_CURRENT_SOURCE_DIR}/${source}\n")
+  endforeach()
+
+  # Convert MIDAS_SOURCES to absolute paths for dependencies
+  set(MIDAS_SOURCES_ABS "")
+  foreach(source ${MIDAS_SOURCES})
+    list(APPEND MIDAS_SOURCES_ABS "${CMAKE_CURRENT_SOURCE_DIR}/${source}")
+  endforeach()
+
+  # Run format indexer at BUILD time (not configure time)
+  # This ensures it re-runs whenever source files change
+  add_custom_command(
+    OUTPUT ${LOG_FORMATS_DEF} ${LOG_FORMAT_MAP_H}
+    COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/lib/binlog/scripts/format_indexer.py
+      --sources-file ${SOURCES_LIST_FILE}
+      --def-file ${LOG_FORMATS_DEF}
+      --map-file ${LOG_FORMAT_MAP_H}
+      --namespace mdb::logging::detail
+      --typedef-include common/typedefs.h
+    DEPENDS ${MIDAS_SOURCES_ABS} ${CMAKE_CURRENT_SOURCE_DIR}/lib/binlog/scripts/format_indexer.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    COMMENT "Indexing log format strings from source files"
+    VERBATIM
+  )
+
+  # Create a target that depends on the generated files
+  add_custom_target(generate_log_formats
+    DEPENDS ${LOG_FORMATS_DEF} ${LOG_FORMAT_MAP_H}
+  )
+endif()
+
 # Define this _before_ we add_subdirectory, so that any sub projects can check "do we have gtest?"
 message("Test & building test subjects has been configured to ${BUILD_MDB_TESTS}")
 if(BUILD_MDB_TESTS)
@@ -301,6 +352,12 @@ if(BUILD_MDB_TESTS)
     SOURCES test/unittest/xml_tests.cpp src/utils/xml.cpp src/utils/xml.h
     LIBS)
 
+  if(MDB_BINARY_LOGGING)
+    AddTest(NAME binlog_tests
+      SOURCES test/unittest/binlog_test.cpp
+      LIBS binlog)
+  endif()
+
   # The Driver Test Suite
   find_program(NODEJS "node")
   if(NODEJS)
@@ -321,6 +378,14 @@ endif()
 add_executable(mdb ${MIDAS_SOURCES})
 set_target_properties(mdb PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 set_property(TARGET mdb PROPERTY CXX_STANDARD 23)
+
+# Ensure log format files are generated before compiling mdb
+if(MDB_BINARY_LOGGING)
+  message("Running the format string indexer")
+  add_dependencies(mdb generate_log_formats)
+  target_link_libraries(mdb PRIVATE binlog)
+  target_compile_definitions(mdb PRIVATE MDB_BINARY_LOGGING)
+endif()
 
 # Add the json library
 add_subdirectory(dependencies/quickjs)
@@ -366,6 +431,10 @@ endif()
 add_subdirectory(dependencies/rr "${RR_BINARY_OBJ_DIR}")
 
 target_link_libraries(mdb PRIVATE mdb_spinlock zydis libquickjs mdbjson librr)
+if(MDB_BINARY_LOGGING)
+  target_link_libraries(mdb PRIVATE binlog)
+  target_compile_definitions(mdb PRIVATE MDB_BINARY_LOGGING)
+endif()
 # Link the libraries to your target
 
 target_include_directories(mdb PUBLIC ./dependencies)
@@ -382,6 +451,10 @@ endif()
 
 if(MDB_PROFILE_LOGGER)
   target_compile_definitions(mdb PRIVATE MDB_PROFILE_LOGGER)
+endif()
+
+if(MDB_BINARY_LOGGING)
+  target_compile_definitions(mdb PRIVATE MDB_BINARY_LOGGING)
 endif()
 
 target_link_options(mdb PRIVATE "-fuse-ld=lld")
