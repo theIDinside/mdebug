@@ -49,7 +49,6 @@ template <typename T> class CallableTaskWithResult : public TaskBase
 {
   std::function<T()> mCallable;
   std::optional<T> mResult;
-  std::mutex mResultMutex;
   size_t mIndex;
 
   TaskListImpl<T> *mGroup;
@@ -64,7 +63,6 @@ public:
   Execute() noexcept override
   {
     auto result = mCallable();
-    std::lock_guard lock(mResultMutex);
     mResult = std::move(result);
     mGroup->TaskDone(this);
   }
@@ -72,7 +70,6 @@ public:
   std::optional<T> &&
   GetResult() noexcept
   {
-    std::lock_guard lock(mResultMutex);
     return std::move(mResult);
   }
 
@@ -102,7 +99,7 @@ template <typename T> class ResultCollector
 {
   std::vector<ResultSlot<T>> mSlots;
   std::queue<size_t> mReadyQueue; // For Unordered mode
-  std::mutex mMutex;
+  std::mutex mReadyQueueMutex;
   std::condition_variable mCondition;
   size_t mTotalTasks;
   size_t mCompletedTasks{ 0 };
@@ -112,7 +109,7 @@ template <typename T> class ResultCollector
   std::optional<T>
   TakeAnyFirstReady() noexcept
   {
-    std::unique_lock lock(mMutex);
+    std::unique_lock lock(mReadyQueueMutex);
     // Wait for any result to be ready
     mCondition.wait(lock, [this] { return !mReadyQueue.empty() || mCompletedTasks == mTotalTasks; });
 
@@ -128,7 +125,7 @@ template <typename T> class ResultCollector
   std::optional<T>
   TakeNextOrdered() noexcept
   {
-    std::unique_lock lock(mMutex);
+    std::unique_lock lock(mReadyQueueMutex);
 
     mCondition.wait(lock, [this] {
       return (mNextOrderedIndex < mTotalTasks && mSlots[mNextOrderedIndex].ready) ||
@@ -157,11 +154,11 @@ public:
   void
   StoreResult(size_t index, T &&result) noexcept
   {
-    std::lock_guard lock(mMutex);
     mSlots[index].result = std::move(result);
     mSlots[index].ready = true;
     mCompletedTasks++;
     if (mOrdering == ResultOrderPolicy::Unordered) {
+      std::lock_guard lock(mReadyQueueMutex);
       mReadyQueue.push(index);
     }
     mCondition.notify_all();
@@ -182,7 +179,7 @@ public:
   [[nodiscard]] bool
   HasMore() const noexcept
   {
-    std::lock_guard lock(const_cast<std::mutex &>(mMutex));
+    std::lock_guard lock(const_cast<std::mutex &>(mReadyQueueMutex));
     if (mOrdering == ResultOrderPolicy::Unordered) {
       return !mReadyQueue.empty() || mCompletedTasks < mTotalTasks;
     }

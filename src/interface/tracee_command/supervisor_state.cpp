@@ -1035,7 +1035,7 @@ SupervisorState::RegisterSymbolFile(std::shared_ptr<SymbolFile> symbolFile, bool
   }
 
   // todo(simon): optimization possible; insert in a sorted fashion instead.
-  std::sort(mSymbolFiles.begin(), mSymbolFiles.end(), [&symbolFile](auto &&a, auto &&b) {
+  std::ranges::sort(mSymbolFiles, [&symbolFile](auto &&a, auto &&b) {
     MDB_ASSERT(a->LowProgramCounter() != b->LowProgramCounter(),
       "[{}]: Added object files with identical address ranges. We screwed something up, for sure\na={}\nb={}",
       symbolFile->GetObjectFilePath().c_str(),

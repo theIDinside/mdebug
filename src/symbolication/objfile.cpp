@@ -577,19 +577,19 @@ ObjectFile::SearchDebugSymbolStringTableParallelized(const std::string &regex) c
   std::vector<std::pair<size_t, size_t>> positions;
   size_t previous = 0;
   for (size_t i = jobSize; i < stringTableView.size(); i += jobSize) {
-    auto innerIndex = i;
+    auto innerIndex = std::min(i, stringTableView.size());
     while (innerIndex < stringTableView.size() && stringTableView[innerIndex] != 0) {
       ++innerIndex;
     }
-    positions.emplace_back(previous, innerIndex);
-    previous = i + innerIndex + 1;
+    positions.emplace_back(previous, innerIndex - previous);
+    previous = innerIndex + 1;
   }
 
   // Split work into parallel tasks for large debug string sections
   auto taskList = TaskList::Create<std::vector<std::string>>(TaskList::Unordered);
 
-  for (const auto &[start, end] : positions) {
-    std::string_view strSection = stringTableView.substr(start, end);
+  for (const auto &[start, count] : positions) {
+    std::string_view strSection = stringTableView.substr(start, count);
     taskList->Add([strSection, re]() {
       std::vector<std::string> results{};
       auto it = std::regex_iterator<std::string_view::iterator>{ strSection.cbegin(), strSection.cend(), re };
@@ -631,8 +631,10 @@ ObjectFile::ForEachStructOrClassType(
   // Step 1: Search ELF string sections for matching strings using regex
   std::vector<std::string> matchedStrings;
 
+  const auto ownedPattern = std::string{ pattern.data(), pattern.size() };
+
   if (!exactPattern) {
-    matchedStrings = SearchDebugSymbolStringTable(std::string{ pattern });
+    matchedStrings = SearchDebugSymbolStringTable(ownedPattern);
   } else {
     matchedStrings.emplace_back(pattern);
   }
@@ -700,8 +702,10 @@ ObjectFile::ForEachTypeMatching(
 {
   std::vector<std::string> matchedStrings;
 
+  const auto ownedPattern = std::string{ pattern.data(), pattern.size() };
+
   if (!exactPattern) {
-    matchedStrings = SearchDebugSymbolStringTable(std::string{ pattern });
+    matchedStrings = SearchDebugSymbolStringTable(ownedPattern);
   } else {
     matchedStrings.emplace_back(pattern);
   }

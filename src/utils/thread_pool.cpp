@@ -51,8 +51,8 @@ ThreadPool::Init(u32 pool_size) noexcept
 {
   mThreadPool.reserve(pool_size);
   for (auto i = 0U; i < pool_size; ++i) {
-    mThreadPool.emplace_back(DebuggerThread::SpawnDebuggerThread(
-      std::format("PoolWorker-{}", i), [&](std::stop_token &token) { WorkerLoop(token); }));
+    mThreadPool.emplace_back(DebuggerThread::SpawnDebuggerThread(std::format("PoolWorker-{}", i),
+      [&](std::string_view name, std::stop_token &token) { WorkerLoop(name, token); }));
   }
 }
 
@@ -77,13 +77,13 @@ ThreadPool::ShutdownTasks() const noexcept
 std::shared_ptr<TaskBase>
 ThreadPool::TakeFront()
 {
-  auto result = std::move(mTaskQueue.front());
+  auto result = mTaskQueue.front();
   mTaskQueue.pop();
   return result;
 }
 
 void
-ThreadPool::WorkerLoop(std::stop_token &stop_token) noexcept
+ThreadPool::WorkerLoop(std::string_view threadName, std::stop_token &stop_token) noexcept
 {
   while (!stop_token.stop_requested()) {
     std::shared_ptr<TaskBase> job = nullptr;
@@ -95,9 +95,12 @@ ThreadPool::WorkerLoop(std::stop_token &stop_token) noexcept
       while (!mTaskQueue.empty()) {
         job = TakeFront();
         // Task has not been cancelled, execute it
-        if (!job->IsCancelled()) {
+        if (job && !job->IsCancelled()) {
           break;
         }
+      }
+      if (!job) {
+        continue;
       }
     }
     MDB_ASSERT(job != nullptr, "Failed to retrieve work from task queue");

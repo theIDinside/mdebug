@@ -24,6 +24,14 @@ struct DataBlock
 {
   const u8 *const ptr;
   u64 size;
+
+  [[nodiscard]] constexpr bool IsRegisterLocationDescription() const;
+
+  [[nodiscard]] constexpr std::span<const u8>
+  AsSpan() const
+  {
+    return std::span<const u8>{ ptr, ptr + size };
+  }
 };
 
 constexpr std::span<const u8>
@@ -450,3 +458,16 @@ template <> struct std::formatter<mdb::DwarfTag>
     return std::format_to(ctx.out(), "{}", to_str(tag));
   }
 };
+
+[[nodiscard]] constexpr bool
+mdb::DataBlock::IsRegisterLocationDescription() const
+{
+  switch (static_cast<DwarfOp>(*ptr)) {
+  case DwarfOp::DW_OP_reg0... DwarfOp::DW_OP_reg31:
+    [[fallthrough]];
+  case DwarfOp::DW_OP_regx:
+    return true;
+  default:
+    return false;
+  }
+}

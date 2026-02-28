@@ -225,6 +225,7 @@ public:
   std::string_view ReadString() noexcept;
   void SkipString() noexcept;
   DataBlock ReadBlock(u64 size) noexcept;
+  std::span<const u8> ReadBlockAsSpan(u64 size) noexcept;
 
   /**
    * @brief Reads an 'offset value' from the binary data stream. The offset size is determined when reading the

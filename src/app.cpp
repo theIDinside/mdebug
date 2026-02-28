@@ -112,8 +112,8 @@ Start(int argc, const char **argv, [[maybe_unused]] const char **envp)
     exit(-1);
   }
 
-  auto debugAdapterThread =
-    DebuggerThread::SpawnDebuggerThread("IO-Thread", [&uiThreadSetup, userInterface](std::stop_token &token) {
+  auto debugAdapterThread = DebuggerThread::SpawnDebuggerThread(
+    "IO-Thread", [&uiThreadSetup, userInterface](std::string_view, std::stop_token &token) {
       ui::dap::DapEventSystem dap{ userInterface };
       Tracer::Get().SetUI(&dap);
       uiThreadSetup = true;

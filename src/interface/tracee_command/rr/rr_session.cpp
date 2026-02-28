@@ -707,6 +707,7 @@ Session::DoBreakpointsUpdate(const SymbolFile &newSymbolFile) noexcept
   auto *obj = newSymbolFile.GetObjectFile();
 
   // Apply source code breakpoint specs to new symbol file
+  std::unordered_set<AddrPtr> setAddresses{};
   for (const auto &[sourceFile, specs] : sessionBreakpoints->mSourceCodeBreakpoints) {
     for (auto &sourceCodeFile : obj->GetSourceCodeFiles(sourceFile)) {
       std::vector<Entry> entries;
@@ -720,7 +721,8 @@ Session::DoBreakpointsUpdate(const SymbolFile &newSymbolFile) noexcept
         for (const auto &e : entries | std::views::filter(predicate)) {
           const auto pc = AddrPtr{ e.pc + newSymbolFile.mBaseAddress };
           bool sameSourceLocDiffPc = false;
-          if (sameSourceLocDiffPc) {
+          if (!setAddresses.contains(pc)) {
+            setAddresses.insert(pc);
             auto user = mUserBreakpoints.CreateBreakpointLocationUser<Breakpoint>(*this,
               GetOrCreateBreakpointLocation(pc, *sourceCodeFile, e),
               mTaskLeader,

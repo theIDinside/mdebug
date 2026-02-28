@@ -2342,14 +2342,6 @@ Variables::Execute() noexcept
     return WriteResponse(*error(std::move(msg)));
   }
   auto &context = *requestedContext;
-  auto *frame = context.GetFrame(mVariablesReferenceId);
-  if (!frame) {
-    std::pmr::string err{ MemoryResource() };
-    std::format_to(std::back_inserter(err),
-      "Could not find frame that's referenced via variablesReference {}",
-      mVariablesReferenceId);
-    return WriteResponse(*error(std::move(err)));
-  }
 
   switch (context.mType) {
   case ContextType::Frame: {
@@ -2361,6 +2353,14 @@ Variables::Execute() noexcept
     return WriteResponse(*error(std::move(err)));
   }
   case ContextType::Scope: {
+    auto *frame = context.GetFrame(mVariablesReferenceId);
+    if (!frame) {
+      std::pmr::string err{ MemoryResource() };
+      std::format_to(std::back_inserter(err),
+        "Could not find frame that's referenced via variablesReference {}",
+        mVariablesReferenceId);
+      return WriteResponse(*error(std::move(err)));
+    }
     auto scope = frame->Scope(mVariablesReferenceId);
     switch (scope->type) {
     case ScopeType::Arguments: {

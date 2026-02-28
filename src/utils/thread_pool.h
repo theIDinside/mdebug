@@ -27,7 +27,7 @@ public:
   void PostTask(std::shared_ptr<TaskBase> task) noexcept;
   void PostTasks(std::span<std::shared_ptr<TaskBase>> tasks) noexcept;
   std::vector<std::shared_ptr<TaskBase>> ShutdownTasks() const noexcept;
-  void WorkerLoop(std::stop_token &stop_token) noexcept;
+  void WorkerLoop(std::string_view threadName, std::stop_token &stop_token) noexcept;
 
   static void
   ShutdownGlobalPool() noexcept

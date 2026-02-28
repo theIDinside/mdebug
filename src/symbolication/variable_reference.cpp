@@ -76,7 +76,7 @@ VariableContext::CreateFromFrame(VariableReferenceId varRefId, ContextType type,
 std::shared_ptr<VariableContext>
 VariableContext::CreateFreestanding(TaskInfo *task, SymbolFile *symbolFile, VariableReferenceId varRefId) noexcept
 {
-  return std::make_shared<VariableContext>(task, symbolFile, -1, varRefId, ContextType::Global);
+  return std::make_shared<VariableContext>(task, symbolFile, -1, varRefId, ContextType::Variable);
 }
 
 } // namespace mdb

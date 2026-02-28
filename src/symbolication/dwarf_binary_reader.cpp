@@ -48,9 +48,17 @@ DwarfBinaryReader::SkipString() noexcept
 DataBlock
 DwarfBinaryReader::ReadBlock(u64 size) noexcept
 {
-  const auto ptr = mHead;
+  const u8 *ptr = mHead;
   mHead += size;
   return { .ptr = ptr, .size = size };
+}
+
+std::span<const u8>
+DwarfBinaryReader::ReadBlockAsSpan(u64 size) noexcept
+{
+  const u8 *ptr = mHead;
+  mHead += size;
+  return std::span<const u8>{ ptr, ptr + size };
 }
 
 u64

@@ -77,25 +77,25 @@ public:
   Immutable<NonNullPtr<TaskInfo>> mTask;
 
   template <typename T>
-  explicit Frame(SymbolFile *symbol_file,
+  explicit Frame(SymbolFile *symbolFile,
     TaskInfo &task,
     u32 level,
-    VariableReferenceId frame_id,
+    VariableReferenceId frameId,
     AddrPtr pc,
-    T sym_info) noexcept
-      : mFramePc(pc), mFrameLevel(level), mFrameId(frame_id), mOwningSymbolFile(symbol_file), mTask(NonNull(task))
+    T symbolInfo) noexcept
+      : mFramePc(pc), mFrameLevel(level), mFrameId(frameId), mOwningSymbolFile(symbolFile), mTask(NonNull(task))
   {
     using Type = std::remove_pointer_t<std::remove_const_t<T>>;
     static_assert(std::is_pointer_v<T> || std::is_same_v<T, std::nullptr_t>,
       "Frame expects either FunctionSymbol or MinSymbol pointers (or a nullptr)");
     if constexpr (std::is_same_v<Type, sym::FunctionSymbol> || std::is_same_v<Type, const sym::FunctionSymbol>) {
       mFrameType = FrameType::Full;
-      mSymbolUnion.uFullSymbol = sym_info;
+      mSymbolUnion.uFullSymbol = symbolInfo;
       MDB_ASSERT(mSymbolUnion.uFullSymbol != nullptr,
         "Setting to nullptr when expecting full symbol information to exist.");
     } else if constexpr (std::is_same_v<Type, MinSymbol> || std::is_same_v<Type, const MinSymbol>) {
       mFrameType = FrameType::ElfSymbol;
-      mSymbolUnion.uMinSymbol = sym_info;
+      mSymbolUnion.uMinSymbol = symbolInfo;
       MDB_ASSERT(
         mSymbolUnion.uMinSymbol != nullptr, "Setting to nullptr when expecting ELF symbol information to exist.");
     } else if constexpr (std::is_null_pointer_v<T>) {
@@ -120,7 +120,7 @@ public:
   VariableReferenceId FrameId() const noexcept;
   int FrameLevel() const noexcept;
   AddrPtr FramePc() const noexcept;
-  SymbolFile *GetSymbolFile() const noexcept;
+  [[nodiscard]] SymbolFile *GetSymbolFile() const noexcept;
   TaskInfo *Task() const noexcept;
 
   sym::FunctionSymbol &FullSymbolInfo() const noexcept;
