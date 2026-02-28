@@ -284,6 +284,9 @@ public:
   static Ref<Value> CreateFrameVariable(
     tc::SupervisorState &tc, const sym::Frame &frame, Symbol &symbol, bool lazy) noexcept;
 
+  static Ref<Value> CreateSyntheticVariable(
+    const VariableContext &varContext, AddrPtr address, SyntheticType type, bool lazy);
+
   static Ref<Value> CreateSyntheticVariable(tc::SupervisorState &tc,
     TaskInfo *task,
     SymbolFile *symbolFile,
@@ -320,4 +323,18 @@ public:
   std::span<const u8> RawView() noexcept final;
   std::span<const u8> View(u32 offset, u32 size) noexcept final;
 };
+
+// A `SynthesizedMemoryContentsObject` is a memory object that has been created in the debugger (most likely in the
+// scripting realm) and as such doesn't map to a specific address in the target.
+class SynthesizedMemoryContentsObject final : public MemoryContentsObject
+{
+  MemoryContentBytes mContents{ nullptr };
+
+public:
+  SynthesizedMemoryContentsObject(AddrPtr start, AddrPtr end, MemoryContentBytes bytes) noexcept;
+  bool Refresh(tc::SupervisorState &supervisor) noexcept final;
+  std::span<const u8> RawView() noexcept final;
+  std::span<const u8> View(u32 offset, u32 size) noexcept final;
+};
+
 } // namespace mdb::sym

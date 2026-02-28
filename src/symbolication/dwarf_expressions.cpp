@@ -5,11 +5,15 @@
 #include <common.h>
 #include <interface/tracee_command/supervisor_state.h>
 #include <symbolication/dwarf_frameunwinder.h>
+#include <symbolication/objfile.h>
 #include <task.h>
 #include <utils/todo.h>
 
 // std
 #include <utility>
+
+#define DW_OP_TODO(msg, ...)                                                                                      \
+  TODO_FMT("objectfile={}, " msg, i.mObjectFile->GetPathString() __VA_OPT__(, ) __VA_ARGS__);
 
 namespace mdb::sym {
 
@@ -49,10 +53,13 @@ DwarfStack::Swap() noexcept
   mStack[mStackSize - 2] = tmp;
 }
 
-ExprByteCodeInterpreter::ExprByteCodeInterpreter(
-  int frameLevel, tc::SupervisorState &tc, TaskInfo &t, std::span<const u8> byteStream) noexcept
+ExprByteCodeInterpreter::ExprByteCodeInterpreter(int frameLevel,
+  tc::SupervisorState &tc,
+  TaskInfo &t,
+  std::span<const u8> byteStream,
+  ObjectFile *objectFile) noexcept
     : mFrameLevel(frameLevel), mStack(), mSupervisor(tc), mTask(t), mByteStream(byteStream),
-      mReader(nullptr, byteStream.data(), byteStream.size())
+      mReader(nullptr, byteStream.data(), byteStream.size()), mObjectFile(objectFile)
 {
 }
 
@@ -60,9 +67,10 @@ ExprByteCodeInterpreter::ExprByteCodeInterpreter(int frameLevel,
   tc::SupervisorState &tc,
   TaskInfo &t,
   std::span<const u8> byteStream,
-  std::span<const u8> frameBaseCode) noexcept
+  std::span<const u8> frameBaseCode,
+  ObjectFile *objectFile) noexcept
     : mFrameLevel(frameLevel), mStack(), mSupervisor(tc), mTask(t), mByteStream(byteStream),
-      mFrameBaseProgram(frameBaseCode), mReader(this->mByteStream)
+      mFrameBaseProgram(frameBaseCode), mReader(this->mByteStream), mObjectFile(objectFile)
 {
 }
 
@@ -146,27 +154,27 @@ op_deref_size(ExprByteCodeInterpreter &i) noexcept
   }
 }
 void
-op_xderef_size(ExprByteCodeInterpreter &) noexcept
+op_xderef_size(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO("op_xderef_size not supported yet!");
+  DW_OP_TODO("op_xderef_size not supported yet!");
 }
 
 void
-op_xderef(ExprByteCodeInterpreter &) noexcept
+op_xderef(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO("op_xderef not supported yet!");
+  DW_OP_TODO("op_xderef not supported yet!");
 }
 
 void
-op_push_object_address(ExprByteCodeInterpreter &) noexcept
+op_push_object_address(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO("op_push_object_address not yet supported!");
+  DW_OP_TODO("op_push_object_address not yet supported!");
 }
 
 void
-op_form_tls_address(ExprByteCodeInterpreter &) noexcept
+op_form_tls_address(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO("op_form_tls_address not supported yet!");
+  DW_OP_TODO("op_form_tls_address not supported yet!");
 }
 
 void
@@ -366,7 +374,7 @@ op_shr(ExprByteCodeInterpreter &i) noexcept
 void
 op_shra(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO("op_shra???");
+  DW_OP_TODO("op_shra???");
   const auto a = i.mStack.Pop();
   const auto b = i.mStack.Pop();
   const auto res = static_cast<int>(a) >> static_cast<int>(b);
@@ -466,33 +474,47 @@ op_bregx(ExprByteCodeInterpreter &i) noexcept
   const auto result = i.GetRegister(reg_num).transform([&](auto v) { return v + offset; });
   MUST_HOLD(result.has_value(), "could not get register contents");
   i.mStack.Push<u64>(result.value());
-  TODO("op_bregx")
+  DW_OP_TODO("op_bregx")
 }
 void
 op_piece(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO(std::format("op_piece {}", i.mStack.mStackSize));
+  const auto size_bytes = i.mReader.ReadUleb128<u32>();
+
+  i.mIsComposite = true;
+
+  // The previous computation left a location description on the stack (or in a register)
+  if (i.mStack.mStackSize > 0) {
+    const auto location_value = i.mStack.Pop();
+
+    // For now, we'll treat this as a memory address
+    // TODO: Need to track whether this was a register location (DW_OP_reg*) or memory
+    i.mPieces.push_back(LocationPiece::Memory(location_value, size_bytes));
+  } else {
+    // No location on stack - this piece is unavailable/optimized out
+    i.mPieces.push_back(LocationPiece::Unavailable(size_bytes));
+  }
 }
 
 void
-op_nop(ExprByteCodeInterpreter &) noexcept
+op_nop(ExprByteCodeInterpreter &i) noexcept
 {
 }
 
 void
 op_call2(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO(std::format("op_call2 {}", i.mStack.mStackSize));
+  DW_OP_TODO("op_call2");
 }
 void
 op_call4(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO(std::format("op_call4 {}", i.mStack.mStackSize));
+  DW_OP_TODO("op_call4 {}", i.mStack.mStackSize);
 }
 void
 op_call_ref(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO(std::format("op_call_ref {}", i.mStack.mStackSize));
+  DW_OP_TODO("op_call_ref {}", i.mStack.mStackSize);
 }
 
 void
@@ -506,19 +528,227 @@ op_call_frame_cfa(ExprByteCodeInterpreter &i) noexcept
 }
 
 void
-op_bit_piece(ExprByteCodeInterpreter &) noexcept
+op_bit_piece(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO("op_bit_piece");
+  const auto size_bits = i.mReader.ReadUleb128<u32>();
+  const auto bit_offset = i.mReader.ReadUleb128<u32>();
+
+  i.mIsComposite = true;
+
+  // The previous computation left a location description on the stack
+  if (i.mStack.mStackSize > 0) {
+    const auto location_value = i.mStack.Pop();
+
+    // Create a bit piece
+    LocationPiece piece = LocationPiece::Memory(location_value, (size_bits + 7) / 8);
+    piece.mSizeBits = size_bits;
+    piece.mBitOffset = bit_offset;
+    i.mPieces.push_back(piece);
+  } else {
+    // No location on stack - this piece is unavailable/optimized out
+    LocationPiece piece = LocationPiece::Unavailable((size_bits + 7) / 8);
+    piece.mSizeBits = size_bits;
+    piece.mBitOffset = bit_offset;
+    i.mPieces.push_back(piece);
+  }
 }
 void
-op_implicit_value(ExprByteCodeInterpreter &) noexcept
+op_implicit_value(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO("op_implicit_value");
+  DW_OP_TODO("op_implicit_value");
 }
+
 void
-op_stack_value(ExprByteCodeInterpreter &) noexcept
+op_stack_value(ExprByteCodeInterpreter &i) noexcept
 {
-  TODO("op_stack_value");
+  // DW_OP_stack_value indicates that the value at the top of the stack is the actual value,
+  // not a memory address. This is a semantic marker - no stack manipulation needed.
+}
+
+void
+op_implicit_pointer(ExprByteCodeInterpreter &i)
+{
+  DW_OP_TODO("op_implicit_pointer");
+}
+
+void
+op_addrx(ExprByteCodeInterpreter &i)
+{
+  DW_OP_TODO("op_addrx");
+}
+
+void
+op_constx(ExprByteCodeInterpreter &i)
+{
+  DW_OP_TODO("op_constx")
+}
+
+void
+op_entry_value(ExprByteCodeInterpreter &i)
+{
+  const auto len = i.mReader.ReadUleb128<u64>();
+  DataBlock block = i.mReader.ReadBlock(len);
+
+  if (!block.IsRegisterLocationDescription()) {
+    ExprByteCodeInterpreter interpreter{ i.mFrameLevel, i.mSupervisor, i.mTask, block.AsSpan(), i.mObjectFile };
+    const auto location = interpreter.Run();
+    // For entry values, we expect a simple location that can be pushed to the stack
+    // TODO: Handle composite locations properly
+    MDB_ASSERT(location.IsSimple(), "Only simple location is supported here for now");
+    i.mStack.Push(location.uAddress);
+  } else {
+    u64 registerNumber = [&]() {
+      DwarfBinaryReader reader(block.AsSpan());
+      auto op = reader.ReadByte<DwarfOp>();
+      if (op >= DwarfOp::DW_OP_reg0 && op <= DwarfOp::DW_OP_reg31) {
+        return static_cast<u64>(op) - static_cast<u64>(DwarfOp::DW_OP_reg0);
+      }
+      return reader.ReadUleb128<u64>();
+    }();
+
+    auto *unwindState = i.mTask.GetUnwindState(i.mFrameLevel - 1);
+    MDB_ASSERT(unwindState, "Expected FrameUnwindState but got null");
+    auto registerContentsAtEntry = unwindState->GetRegister(registerNumber);
+    if (registerContentsAtEntry) {
+      i.mStack.Push(registerContentsAtEntry.GetRaw());
+    }
+  }
+}
+
+void
+op_const_type(ExprByteCodeInterpreter &i)
+{
+  DW_OP_TODO("op_const_type")
+}
+
+void
+op_regval_type(ExprByteCodeInterpreter &i)
+{
+  DW_OP_TODO("op_regval_type")
+}
+
+void
+op_deref_type(ExprByteCodeInterpreter &i)
+{
+  DW_OP_TODO("op_deref_type")
+}
+
+void
+op_xderef_type(ExprByteCodeInterpreter &i)
+{
+  DW_OP_TODO("op_xderef_type")
+}
+
+void
+op_convert(ExprByteCodeInterpreter &i)
+{
+  DW_OP_TODO("op_convert")
+}
+
+void
+op_reinterpret(ExprByteCodeInterpreter &i)
+{
+  DW_OP_TODO("op_reinterpret")
+}
+
+// GNU extensions
+void
+op_gnu_push_tls_address(ExprByteCodeInterpreter &i) noexcept
+{
+  DW_OP_TODO("op_gnu_push_tls_address");
+}
+
+void
+op_gnu_uninit(ExprByteCodeInterpreter &i) noexcept
+{
+  // Marks the preceding value as uninitialized. This is a semantic marker.
+}
+
+void
+op_gnu_encoded_addr(ExprByteCodeInterpreter &i) noexcept
+{
+  DW_OP_TODO("op_gnu_encoded_addr");
+}
+
+void
+op_gnu_implicit_pointer(ExprByteCodeInterpreter &i) noexcept
+{
+  // Skip the DIE offset and the offset into the pointed-to value
+  i.mReader.ReadValue<u64>();  // DIE offset
+  i.mReader.ReadLeb128<i64>(); // offset
+  DW_OP_TODO("op_gnu_implicit_pointer");
+}
+
+void
+op_gnu_entry_value(ExprByteCodeInterpreter &i) noexcept
+{
+  // op_gnu_entry_value is an old opcode for DWARF 5 (4?) op_entry_value
+  op_entry_value(i);
+}
+
+void
+op_gnu_const_type(ExprByteCodeInterpreter &i) noexcept
+{
+  i.mReader.ReadUleb128<u64>(); // DIE offset for type
+  const auto size = i.mReader.ReadValue<u8>();
+  i.mReader.Skip(size); // constant value bytes
+  DW_OP_TODO("op_gnu_const_type");
+}
+
+void
+op_gnu_regval_type(ExprByteCodeInterpreter &i) noexcept
+{
+  i.mReader.ReadUleb128<u64>(); // register number
+  i.mReader.ReadUleb128<u64>(); // DIE offset for type
+  DW_OP_TODO("op_gnu_regval_type");
+}
+
+void
+op_gnu_deref_type(ExprByteCodeInterpreter &i) noexcept
+{
+  const auto size = i.mReader.ReadValue<u8>();
+  i.mReader.ReadUleb128<u64>(); // DIE offset for type
+  const auto addr = i.mStack.Pop();
+  // For now, just do a basic deref of the specified size
+  switch (size) {
+  case 1: {
+    const TPtr<u8> ptr{ addr };
+    i.mStack.Push<u64>(i.mSupervisor.ReadType(ptr));
+  } break;
+  case 2: {
+    const TPtr<u16> ptr{ addr };
+    i.mStack.Push<u64>(i.mSupervisor.ReadType(ptr));
+  } break;
+  case 4: {
+    const TPtr<u32> ptr{ addr };
+    i.mStack.Push<u64>(i.mSupervisor.ReadType(ptr));
+  } break;
+  case 8: {
+    const TPtr<u64> ptr{ addr };
+    i.mStack.Push<u64>(i.mSupervisor.ReadType(ptr));
+  } break;
+  }
+}
+
+void
+op_gnu_convert(ExprByteCodeInterpreter &i) noexcept
+{
+  i.mReader.ReadUleb128<u64>(); // DIE offset for type
+  DW_OP_TODO("op_gnu_convert: type conversion not implemented");
+}
+
+void
+op_gnu_reinterpret(ExprByteCodeInterpreter &i) noexcept
+{
+  i.mReader.ReadUleb128<u64>(); // DIE offset for type
+  DW_OP_TODO("op_gnu_reinterpret: type reinterpretation not implemented");
+}
+
+void
+op_gnu_parameter_ref(ExprByteCodeInterpreter &i) noexcept
+{
+  i.mReader.ReadValue<u32>(); // DIE offset for parameter
+  DW_OP_TODO("op_gnu_parameter_ref");
 }
 
 static Op ops[0xff] = {
@@ -682,24 +912,51 @@ static Op ops[0xff] = {
   &op_bit_piece,           // 0x9d
   &op_implicit_value,      // 0x9e
   &op_stack_value,         // 0x9f
+  &op_implicit_pointer,    // 0xa0
+  &op_addrx,               // 0xa1
+  &op_constx,              // 0xa2
+  &op_entry_value,         // 0xa3
+  &op_const_type,          // 0xa4
+  &op_regval_type,         // 0xa5
+  &op_deref_type,          // 0xa6
+  &op_xderef_type,         // 0xa7
+  &op_convert,             // 0xa8
+  &op_reinterpret,         // 0xa9
                            // clang-format off
-    &ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,
-    &ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,
-    &ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,
-    &ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,
-    &ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,
-    &ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,
-    &ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,
-    &ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,
-    &ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,
-    &ub,&ub,&ub,&ub
-    // clang-format-on
+  // 0xaa-0xdf: undefined opcodes
+  &ub,&ub,&ub,&ub,&ub,&ub, // 0xaa-0xaf
+  &ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub, // 0xb0-0xbf
+  &ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub, // 0xc0-0xcf
+  &ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub, // 0xd0-0xdf
+  // GNU extensions
+  &op_gnu_push_tls_address,  // 0xe0
+  &ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub,&ub, // 0xe1-0xef
+  &op_gnu_uninit,            // 0xf0
+  &op_gnu_encoded_addr,      // 0xf1
+  &op_gnu_implicit_pointer,  // 0xf2
+  &op_gnu_entry_value,       // 0xf3
+  &op_gnu_const_type,        // 0xf4
+  &op_gnu_regval_type,       // 0xf5
+  &op_gnu_deref_type,        // 0xf6
+  &op_gnu_convert,           // 0xf7
+  &ub,                       // 0xf8
+  &op_gnu_reinterpret,       // 0xf9
+  &op_gnu_parameter_ref,     // 0xfa
+  &ub,&ub,&ub,&ub            // 0xfb-0xfe
+  // clang-format-on
 };
 
-AddrPtr ExprByteCodeInterpreter::ComputeFrameBase() noexcept {
-  MDB_ASSERT(mFrameLevel != -1, "**Requires** frame level to be known for this DWARF expression computation but was -1 (undefined/unknown)");
-  ExprByteCodeInterpreter frameBaseReader{mFrameLevel, mSupervisor, mTask, mFrameBaseProgram};
-  return frameBaseReader.Run();
+AddrPtr
+ExprByteCodeInterpreter::ComputeFrameBase() noexcept
+{
+  MDB_ASSERT(mFrameLevel != -1,
+    "**Requires** frame level to be known for this DWARF expression computation but was -1 (undefined/unknown)");
+  ExprByteCodeInterpreter frameBaseReader{ mFrameLevel, mSupervisor, mTask, mFrameBaseProgram, mObjectFile };
+  const auto location = frameBaseReader.Run();
+  // Frame base should be a simple memory address
+  MDB_ASSERT(location.IsSimple() && location.mKind == LocationKind::Memory,
+    "Frame base expression must evaluate to a simple memory address");
+  return AddrPtr{ location.uAddress };
 }
 
 std::optional<u64> ExprByteCodeInterpreter::GetRegister(u64 number)
@@ -711,7 +968,7 @@ std::optional<u64> ExprByteCodeInterpreter::GetRegister(u64 number)
   return unwindState->GetRegister(number);
 }
 
-u64
+LocationDescription
 ExprByteCodeInterpreter::Run() noexcept
 {
   PROFILE_SCOPE("ExprByteCodeInterpreter::Run", "bytecode-interpreter");
@@ -721,6 +978,13 @@ ExprByteCodeInterpreter::Run() noexcept
     const auto idx = std::to_underlying(op);
     ops[idx](*this);
   }
-  return mStack.mStack[0];
+
+  // If we built up a composite location, return it
+  if (mIsComposite) {
+    return LocationDescription::Composite(std::move(mPieces));
+  }
+
+  // Otherwise, return a simple memory location (legacy behavior)
+  return LocationDescription::Memory(mStack.mStack[0]);
 }
 } // namespace sym

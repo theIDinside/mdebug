@@ -20,6 +20,7 @@ struct JsType : public JSBinding<JsType, sym::Type, JavascriptClasses::Type>
   static auto Members(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
   static auto ToPrimitive(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
   static auto PointeeSize(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
+  static auto TemplateArgument(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept -> JSValue;
 
   static constexpr std::span<const JSCFunctionListEntry>
   PrototypeFunctions() noexcept
@@ -31,6 +32,7 @@ struct JsType : public JSBinding<JsType, sym::Type, JavascriptClasses::Type>
       FunctionEntry("pointeeSize", 0, &PointeeSize),
       FunctionEntry("member", 1, &Member),
       FunctionEntry("members", 0, &Members),
+      FunctionEntry("templateArgument", 1, &TemplateArgument),
       ToStringTag("Type") });
     return fns;
   }

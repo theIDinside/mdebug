@@ -44,7 +44,7 @@ ResolveReference::Resolve(const VariableContext &context, ValueRange valueRange)
       return results;
     }
     auto indirectValueObject = std::make_shared<EagerMemoryContentsObject>(
-      adjusted_address, adjusted_address + memory.value->size(), std::move(memory.value));
+      adjusted_address, adjusted_address + memory.value->Size(), std::move(memory.value));
 
     auto clonedContext = dereferencedType->IsPrimitive() ? VariableContext::CloneFrom(0, context)
                                                          : Tracer::CloneFromVariableContext(context);
@@ -93,7 +93,7 @@ ResolveCString::Resolve(const VariableContext &context, ValueRange valueRange) n
       return results;
     }
     auto indirectValueObject = std::make_shared<EagerMemoryContentsObject>(
-      adjustedAddress, adjustedAddress + referencedMemory.value->size(), std::move(referencedMemory.value));
+      adjustedAddress, adjustedAddress + referencedMemory.value->Size(), std::move(referencedMemory.value));
 
     // actual `char` type
     auto *layoutType = value.GetType()->TypeDescribingLayoutOfThis();

@@ -59,7 +59,8 @@ Reg::Reg() noexcept : uValue(0), mRule(RegisterRule::Undefined) {}
 CFAStateMachine::CFAStateMachine(
   tc::SupervisorState &supervisor, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept
     : mSupervisor(supervisor), mTask(task), mFrameDescriptionEntryPc(cfi.start()), mEndPc(pc),
-      mCanonicalFrameAddressData({ .mIsExpression = false, .reg = { 0, 0 } }), mRuleTable()
+      mCanonicalFrameAddressData({ .mIsExpression = false, .reg = { .uNumber = 0, .uOffset = 0 } }), mRuleTable(),
+      mObjectFile(cfi.mSymbolFile->GetObjectFile())
 {
   mRuleTable.fill(Reg{});
 }
@@ -70,9 +71,10 @@ CFAStateMachine::CFAStateMachine(tc::SupervisorState &supervisor,
   UnwindInfoSymbolFilePair cfi,
   AddrPtr pc) noexcept
     : mSupervisor(supervisor), mTask(task), mFrameDescriptionEntryPc(cfi.start()), mEndPc(pc),
-      mCanonicalFrameAddressData({ .mIsExpression = false, .reg = { 0, 0 } })
+      mCanonicalFrameAddressData({ .mIsExpression = false, .reg = { .uNumber = 0, .uOffset = 0 } }),
+      mObjectFile(cfi.mSymbolFile->GetObjectFile())
 {
-  for (auto i = 0u; i < mRuleTable.size(); ++i) {
+  for (size_t i = 0; i < mRuleTable.size(); ++i) {
     mRuleTable[i].mRule = RegisterRule::Undefined;
     mRuleTable[i].uValue = frameBelow[i];
   }
@@ -145,8 +147,12 @@ u64
 CFAStateMachine::ComputeExpression(std::span<const u8> bytes, int frameLevel) noexcept
 {
   DBGLOG(eh, "compute_expression of dwarf expression of {} bytes", bytes.size());
-  auto intepreter = ExprByteCodeInterpreter{ frameLevel, mSupervisor, mTask, bytes };
-  return intepreter.Run();
+  MDB_ASSERT(mObjectFile, "Assertion");
+  auto intepreter = ExprByteCodeInterpreter{ frameLevel, mSupervisor, mTask, bytes, mObjectFile };
+  const auto location = intepreter.Run();
+  // CFA computation should result in a simple memory address
+  MDB_ASSERT(location.IsSimple(), "CFA expression must evaluate to a simple location");
+  return location.uAddress;
 }
 
 void

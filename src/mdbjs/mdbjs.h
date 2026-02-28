@@ -73,7 +73,12 @@ class EventDispatcher;
     "registerResolver",                                                                                           \
     3,                                                                                                            \
     "Register a value resolver, resolving your types in the fashion that you're interested in. ")                 \
-  FNDESC(LoadScript, "loadScript", 1, "Load and execute a JavaScript file from an absolute path.")
+  FNDESC(LoadScript, "loadScript", 1, "Load and execute a JavaScript file from an absolute path.")                \
+  FNDESC(CreateArrayAt,                                                                                           \
+    "createArrayAt",                                                                                              \
+    4,                                                                                                            \
+    "Create an array of variables from the contiguous memory address starting at [address:address+(count* size "  \
+    "of type)]. Function arguments: (address, type, count, sourceVariable).")
 
 using JsFunction = JSValue (*)(JSContext *ctx, JSValueConst thisValue, int argCount, JSValueConst *argv);
 

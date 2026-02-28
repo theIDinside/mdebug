@@ -96,17 +96,18 @@ class CFAStateMachine
   friend int decode(DwarfBinaryReader &reader, CFAStateMachine &state, const UnwindInfo *cfi);
 
 public:
-  CFAStateMachine(tc::SupervisorState &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept;
+  CFAStateMachine(
+    tc::SupervisorState &supervisor, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept;
 
-  CFAStateMachine(tc::SupervisorState &tc,
+  CFAStateMachine(tc::SupervisorState &supervisor,
     TaskInfo &task,
-    const RegisterValues &frame_below,
+    const RegisterValues &frameBelow,
     UnwindInfoSymbolFilePair cfi,
     AddrPtr pc) noexcept;
   /* Initialization routine for the statemachine - it saves the current task register into the state machine
    * registers. */
   static CFAStateMachine Init(
-    tc::SupervisorState &tc, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept;
+    tc::SupervisorState &supervisor, TaskInfo &task, UnwindInfoSymbolFilePair cfi, AddrPtr pc) noexcept;
   u64 ComputeExpression(std::span<const u8> bytes, int frameLevel = -1) noexcept;
   u64 ResolveRegisterContents(
     u64 registerNumber, const FrameUnwindState &belowFrame, int frameLevel = -1) noexcept;
@@ -141,6 +142,7 @@ private:
   bool mResumeAddressUndefined{ false };
   std::vector<RegisterRuleTable> mRememberedState;
   std::vector<CFA> mRememberedCFA;
+  ObjectFile *mObjectFile{ nullptr };
 };
 
 struct Enc

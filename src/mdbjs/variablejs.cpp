@@ -64,6 +64,39 @@ JsType::PointeeSize(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, a
 }
 
 /* static */ JSValue
+JsType::TemplateArgument(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
+{
+  sym::Type *type = GetThisOrReturnException(type, kTypeBindingDataError);
+
+  if (argCount != 1 || !JS_IsNumber(argv[0])) {
+    return JS_ThrowTypeError(cx, "TemplateArgument requires a number argument (index)");
+  }
+
+  u32 index = 0;
+  JS_ToUint32(cx, &index, argv[0]);
+
+  const auto *templateArg = type->TemplateTypeParameter(index);
+
+  if (!templateArg) {
+    return JS_ThrowRangeError(cx, "Template argument index %u out of range", index);
+  }
+
+  if (templateArg->IsTemplateValueParameter()) {
+    auto byteBuffer = ByteBuffer::Create(templateArg->mConstValueBytes.size());
+    (void)byteBuffer->Write(templateArg->mConstValueBytes);
+
+    auto memoryContents = std::make_shared<sym::SynthesizedMemoryContentsObject>(
+      AddrPtr{ nullptr }, AddrPtr{ templateArg->mConstValueBytes.size() }, std::move(byteBuffer));
+
+    auto value = Ref<sym::Value>::MakeShared(nullptr, *templateArg->mType, 0U, memoryContents, nullptr);
+
+    return JsVariable::CreateValue(cx, std::move(value));
+  }
+  // This is a template type parameter
+  return JsType::CreateValue(cx, templateArg->mType);
+}
+
+/* static */ JSValue
 JsType::Member(JSContext *cx, JSValue thisValue, JS_UNUSED_ARGS(argCount, argv)) noexcept
 {
   sym::Type *type = GetThisOrReturnException(type, kTypeBindingDataError);
@@ -300,6 +333,28 @@ JsVariable::SetValue(JSContext *cx, JSValue thisValue, int argCount, JSValue *ar
   return JS_ThrowTypeError(cx, "Unsupported JS Value tag for this operation (Variable::SetValue): %d", argTag);
 }
 
+template <typename To>
+To
+BitCopyAndMaybeProcessBitField(std::span<const u8> from, const sym::Value &value)
+{
+  static_assert(std::is_trivial_v<To>, "Target of bit copy must be trivially constructible.");
+
+  // Non-bitfield values is returned as-is.
+  const auto bitField = value.BitField();
+  return bitField
+    .transform([&](const sym::BitField &field) {
+      u64 rawBits = 0;
+      std::memcpy(&rawBits, from.data(), std::min(sizeof(u64), from.size()));
+      return static_cast<To>(field.ExtractBits(rawBits));
+    })
+    .or_else([&]() -> std::optional<To> {
+      To result{};
+      std::memcpy(&result, from.data(), std::min(sizeof(To), from.size()));
+      return result;
+    })
+    .value();
+}
+
 /* static */
 JSValue
 JsVariable::ToPrimitive(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv) noexcept
@@ -318,12 +373,12 @@ JsVariable::ToPrimitive(JSContext *cx, JSValue thisValue, int argCount, JSValue 
     auto byteSpan = value->MemoryView();
     switch (*baseType) {
     case BaseTypeEncoding::DW_ATE_address: {
-      std::uintptr_t value = sym::BitCopy<std::uintptr_t>(byteSpan);
-      return JS_NewBigUint64(cx, value);
+      auto v = BitCopyAndMaybeProcessBitField<std::uintptr_t>(byteSpan, *value);
+      return JS_NewBigUint64(cx, v);
     }
     case BaseTypeEncoding::DW_ATE_boolean: {
-      bool value = sym::BitCopy<bool>(byteSpan);
-      return JS_NewBool(cx, value);
+      bool v = BitCopyAndMaybeProcessBitField<bool>(byteSpan, *value);
+      return JS_NewBool(cx, v);
     }
     case BaseTypeEncoding::DW_ATE_float: {
       double doubleValue;
@@ -344,19 +399,19 @@ JsVariable::ToPrimitive(JSContext *cx, JSValue thisValue, int argCount, JSValue 
     case BaseTypeEncoding::DW_ATE_signed_char: {
       switch (type->Size()) {
       case 1: {
-        int res = int{ sym::BitCopy<signed char>(byteSpan) };
+        int res = int{ BitCopyAndMaybeProcessBitField<signed char>(byteSpan, *value) };
         return JS_NewInt32(cx, res);
       }
       case 2: {
-        int res = int{ sym::BitCopy<signed short>(byteSpan) };
+        int res = int{ BitCopyAndMaybeProcessBitField<signed short>(byteSpan, *value) };
         return JS_NewInt32(cx, res);
       }
       case 4: {
-        int res = sym::BitCopy<int>(byteSpan);
+        int res = BitCopyAndMaybeProcessBitField<int>(byteSpan, *value);
         return JS_NewInt32(cx, res);
       }
       case 8: {
-        i64 res = sym::BitCopy<i64>(byteSpan);
+        i64 res = BitCopyAndMaybeProcessBitField<i64>(byteSpan, *value);
         return JS_NewInt64(cx, res);
       }
       }
@@ -366,19 +421,19 @@ JsVariable::ToPrimitive(JSContext *cx, JSValue thisValue, int argCount, JSValue 
     case BaseTypeEncoding::DW_ATE_unsigned_char: {
       switch (type->Size()) {
       case 1: {
-        u8 res = sym::BitCopy<unsigned char>(byteSpan);
+        u8 res = BitCopyAndMaybeProcessBitField<unsigned char>(byteSpan, *value);
         return JS_NewUint32(cx, res);
       }
       case 2: {
-        u16 res = sym::BitCopy<unsigned short>(byteSpan);
+        u16 res = BitCopyAndMaybeProcessBitField<unsigned short>(byteSpan, *value);
         return JS_NewUint32(cx, res);
       }
       case 4: {
-        u32 res = sym::BitCopy<u32>(byteSpan);
+        u32 res = BitCopyAndMaybeProcessBitField<u32>(byteSpan, *value);
         return JS_NewUint32(cx, res);
       }
       case 8: {
-        u64 res = sym::BitCopy<u64>(byteSpan);
+        u64 res = BitCopyAndMaybeProcessBitField<u64>(byteSpan, *value);
         return JS_NewBigUint64(cx, res);
       }
       }
@@ -436,8 +491,7 @@ JsVariable::Member(JSContext *cx, JSValue thisValue, int argCount, JSValue *argv
   auto memberValue = value->GetMember(memberName.mString);
 
   if (!memberValue) {
-    const auto msg =
-      std::format("Type '{}' does not have a member named '{}'", type->mName->data(), memberName.mString);
+    const auto msg = std::format("Type '{}' does not have a member named '{}'", *type, memberName.mString);
 
     return JS_ThrowTypeError(cx, "%s", msg.c_str());
   }
@@ -482,7 +536,7 @@ JsVariable::AsArray(JSContext *cx, JSValue thisValue, int argCount, JSValue *arg
 
   sym::Value *pointer = GetThisOrReturnException(pointer, kBindingDataError);
   auto res = pointer->ToRemotePointer();
-  if (!res.has_value()) {
+  if (!res.has_value() && !pointer->IsSynthetic()) {
     return JS_ThrowTypeError(cx, "value is not a representation of a memory address");
   }
 
@@ -494,9 +548,7 @@ JsVariable::AsArray(JSContext *cx, JSValue thisValue, int argCount, JSValue *arg
     return JS_ThrowTypeError(cx, "No variable context found");
   }
 
-  auto synthetic = sym::MemoryContentsObject::CreateSyntheticVariable(*varContext->mTask->GetSupervisor(),
-    varContext->mTask,
-    varContext->mSymbolFile,
+  auto synthetic = sym::MemoryContentsObject::CreateSyntheticVariable(*varContext,
     res.value(),
     sym::SyntheticType{ .mLayoutType = pointer->GetType()->TypeDescribingLayoutOfThis(), .mCount = count },
     true);

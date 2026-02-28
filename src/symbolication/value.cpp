@@ -180,13 +180,18 @@ Value::ToRemotePointer() const noexcept
     return ValueError::InvalidSize(bytes.size_bytes());
   }
   Type *type = GetType();
-  if (!type->IsReference()) {
-    return ValueError::NotAReference();
+
+  if (type->IsReference()) {
+    std::uintptr_t ptr{};
+    std::memcpy(&ptr, bytes.data(), 8);
+    return AddrPtr{ ptr };
   }
 
-  std::uintptr_t ptr{};
-  std::memcpy(&ptr, bytes.data(), 8);
-  return AddrPtr{ ptr };
+  if (IsSynthetic()) {
+    return Address();
+  }
+
+  return ValueError::NotAReference();
 }
 
 std::expected<std::vector<Ref<Value>>, ValueError>
@@ -302,7 +307,7 @@ Value::GetMember(std::string_view memberName) noexcept
     return nullptr;
   }
 
-  for (const Field &member : type->MemberFields()) {
+  for (const Field &member : type->GetMemberFields()) {
     if (member.mName == memberName) {
       MDB_ASSERT(mContext, "Creating member from value that has no context");
       auto variableContext = member.mType->IsPrimitive() ? VariableContext::CloneFrom(0, *mContext)
@@ -629,13 +634,13 @@ EagerMemoryContentsObject::Refresh(tc::SupervisorState &supervisor) noexcept
 std::span<const u8>
 EagerMemoryContentsObject::RawView() noexcept
 {
-  return mContents->span();
+  return mContents->Span();
 }
 
 std::span<const u8>
 EagerMemoryContentsObject::View(u32 offset, u32 size) noexcept
 {
-  return mContents->span().subspan(offset, size);
+  return mContents->Span().subspan(offset, size);
 }
 
 void
@@ -663,7 +668,7 @@ LazyMemoryContentsObject::RawView() noexcept
     CacheMemory();
   }
 
-  return mContents->span();
+  return mContents->Span();
 }
 
 std::span<const u8>
@@ -673,7 +678,7 @@ LazyMemoryContentsObject::View(u32 offset, u32 size) noexcept
     CacheMemory();
   }
 
-  return mContents->span().subspan(offset, size);
+  return mContents->Span().subspan(offset, size);
 }
 
 /*static*/
@@ -785,23 +790,41 @@ MemoryContentsObject::CreateFrameVariable(
   auto dwarfExpression = symbol.GetDwarfExpression(frame.GetSymbolFile()->UnrelocateAddress(frame.FramePc()));
 
   if (dwarfExpression.empty()) {
-    return Ref<Value>::MakeShared(nullptr, symbol.mName, symbol, 0u, nullptr);
+    return Ref<Value>::MakeShared(nullptr, symbol.mName, symbol, u32{ 0 }, nullptr);
   }
-  auto interp = ExprByteCodeInterpreter{
-    frame.FrameLevel(), tc, *frame.mTask, dwarfExpression, fnSymbol->GetFrameBaseDwarfExpression()
-  };
+  auto interp = ExprByteCodeInterpreter{ frame.FrameLevel(),
+    tc,
+    *frame.mTask,
+    dwarfExpression,
+    fnSymbol->GetFrameBaseDwarfExpression(),
+    frame.GetSymbolFile()->GetObjectFile() };
 
   auto variableContext =
     symbol.mType->IsPrimitive()
       ? VariableContext::CreateFromFrame(0, ContextType::Variable, frame)
       : VariableContext::CreateFromFrame(Tracer::NewVariablesReference(), ContextType::Variable, frame);
 
-  const auto address = interp.Run();
+  const auto location = interp.Run();
+
+  // TODO: Handle composite locations properly by creating CompositeMemoryContentsObject
+  // For now, we only support simple memory locations
+  if (!location.IsSimple() || location.mKind != LocationKind::Memory) {
+    DBGLOG(core,
+      "Variable {} has non-simple location (composite/register/implicit) - not yet fully supported",
+      symbol.mName);
+    // For now, treat as address nullptr (will show as unavailable)
+    const AddrPtr address = nullptr;
+    auto memoryObject = std::make_shared<LazyMemoryContentsObject>(tc, address, address);
+    return Ref<sym::Value>::MakeShared(
+      std::move(variableContext), symbol.mName, symbol, u32{ 0 }, std::move(memoryObject));
+  }
+
+  const AddrPtr address = AddrPtr{ location.uAddress };
 
   if (lazy) {
-    auto memory_object = std::make_shared<LazyMemoryContentsObject>(tc, address, address + requested_byte_size);
+    auto memoryObject = std::make_shared<LazyMemoryContentsObject>(tc, address, address + requested_byte_size);
     return Ref<sym::Value>::MakeShared(
-      std::move(variableContext), symbol.mName, symbol, 0u, std::move(memory_object));
+      std::move(variableContext), symbol.mName, symbol, u32{ 0 }, std::move(memoryObject));
   }
 
   auto res = tc.SafeRead(address, requested_byte_size);
@@ -811,7 +834,36 @@ MemoryContentsObject::CreateFrameVariable(
   DBGLOG(dap, "[eager read]: {}:+{}", address, requested_byte_size);
   auto memory_object =
     std::make_shared<EagerMemoryContentsObject>(address, address + requested_byte_size, res.take_value());
-  return Ref<Value>::MakeShared(std::move(variableContext), symbol.mName, symbol, 0u, std::move(memory_object));
+  return Ref<Value>::MakeShared(std::move(variableContext), symbol.mName, symbol, u32{}, std::move(memory_object));
+}
+
+/* static */
+Ref<Value>
+MemoryContentsObject::CreateSyntheticVariable(
+  const VariableContext &varContext, AddrPtr address, SyntheticType type, bool lazy)
+{
+  const auto requestedByteSize = type.mLayoutType->SizeBytes() * type.mCount;
+
+  auto variableContext = VariableContext::CloneFrom(Tracer::NewVariablesReference(), varContext);
+
+  auto *supervisor = variableContext->mTask->GetSupervisor();
+  const auto ref = variableContext->mId;
+  if (lazy) {
+    auto memoryObject =
+      std::make_shared<LazyMemoryContentsObject>(*supervisor, address, address + requestedByteSize);
+    return Ref<sym::Value>::MakeShared(
+      std::move(variableContext), std::format("${}", ref), type, u32{}, std::move(memoryObject));
+  }
+
+  auto res = supervisor->SafeRead(address, requestedByteSize);
+  if (!res.is_expected()) {
+    PANIC("Expected read to succeed");
+  }
+  DBGLOG(dap, "[eager read]: {}:+{}", address, requestedByteSize);
+  auto memoryObject =
+    std::make_shared<EagerMemoryContentsObject>(address, address + requestedByteSize, res.take_value());
+  return Ref<Value>::MakeShared(
+    std::move(variableContext), std::format("${}", ref), type, u32{}, std::move(memoryObject));
 }
 
 /* static */
@@ -827,7 +879,7 @@ MemoryContentsObject::CreateSyntheticVariable(
   if (lazy) {
     auto memoryObject = std::make_shared<LazyMemoryContentsObject>(tc, address, address + requestedByteSize);
     return Ref<sym::Value>::MakeShared(
-      std::move(variableContext), std::format("${}", ref), type, 0U, std::move(memoryObject));
+      std::move(variableContext), std::format("${}", ref), type, u32{}, std::move(memoryObject));
   }
 
   auto res = tc.SafeRead(address, requestedByteSize);
@@ -838,7 +890,31 @@ MemoryContentsObject::CreateSyntheticVariable(
   auto memoryObject =
     std::make_shared<EagerMemoryContentsObject>(address, address + requestedByteSize, res.take_value());
   return Ref<Value>::MakeShared(
-    std::move(variableContext), std::format("${}", ref), type, 0U, std::move(memoryObject));
+    std::move(variableContext), std::format("${}", ref), type, u32{}, std::move(memoryObject));
+}
+
+SynthesizedMemoryContentsObject::SynthesizedMemoryContentsObject(
+  AddrPtr start, AddrPtr end, MemoryContentBytes bytes) noexcept
+    : MemoryContentsObject(start, end), mContents(std::move(bytes))
+{
+}
+
+bool
+SynthesizedMemoryContentsObject::Refresh(tc::SupervisorState &supervisor) noexcept
+{
+  return true;
+}
+
+std::span<const u8>
+SynthesizedMemoryContentsObject::RawView() noexcept
+{
+  return mContents->Span();
+}
+
+std::span<const u8>
+SynthesizedMemoryContentsObject::View(u32 offset, u32 size) noexcept
+{
+  return mContents->Span().subspan(offset, size);
 }
 
 } // namespace mdb::sym

@@ -9,6 +9,7 @@
 #include <mdbjs/taskinfojs.h>
 #include <mdbjs/util.h>
 #include <mdbjs/value_resolver_registry.h>
+#include <mdbjs/variablejs.h>
 #include <session_task_map.h>
 #include <tracer.h>
 #include <utils/logger.h>
@@ -299,6 +300,76 @@ Scripting::LoadScript(
   };
 
   return JS_UNDEFINED;
+}
+
+/* static */ JSValue
+Scripting::CreateArrayAt(
+  JSContext *cx, [[maybe_unused]] JSValueConst thisValue, int argCount, JSValueConst *argv) noexcept
+{
+  if (argCount < 4) {
+    return JS_ThrowTypeError(cx, "createArrayAt requires 4 arguments: (address, type, count, sourceVariable)");
+  }
+
+  const auto toInt = [](JSContext *cx, JSValue value) -> std::optional<u64> {
+    i64 integer = 0;
+    if (JS_IsBigInt(cx, value)) {
+      JS_ToBigInt64(cx, &integer, value);
+      return std::make_optional(static_cast<u64>(integer));
+    }
+    if (JS_IsNumber(value)) {
+      JS_ToInt64(cx, &integer, value);
+      return std::make_optional(static_cast<u64>(integer));
+    }
+    return std::nullopt;
+  };
+
+  // Get address (can be BigInt or number)
+  u64 address = 0;
+  if (auto r = toInt(cx, argv[0]); r) {
+    address = *r;
+  } else {
+    return JS_ThrowTypeError(cx, "First argument (address) must be a number or BigInt");
+  }
+
+  // Get type from JsType
+  auto *type = JsType::GetNative(cx, argv[1]);
+  if (!type) {
+    return JS_ThrowTypeError(cx, "Second argument must be a JsType");
+  }
+
+  u64 count = 0;
+  if (auto r = toInt(cx, argv[2]); r) {
+    count = *r;
+  } else {
+    return JS_ThrowTypeError(cx, "3rd argument (count) must be a number or BigInt");
+  }
+
+  // Get source variable for context
+  auto *srcValue = JsVariable::GetNative(cx, argv[3]);
+  if (!srcValue) {
+    return JS_ThrowTypeError(cx, "Fourth argument must be a JsVariable (for context)");
+  }
+
+  sym::VarContext varContext = srcValue->GetVariableContext();
+  if (!varContext) {
+    return JS_ThrowTypeError(cx, "Source variable has no context");
+  }
+
+  // Create synthetic variable at the given address using context from source variable
+  auto synthetic = sym::MemoryContentsObject::CreateSyntheticVariable(
+    *varContext, AddrPtr{ address }, sym::SyntheticType{ .mLayoutType = type, .mCount = u32(count) }, true);
+
+  JSValue array = JS_NewArray(cx);
+
+  size_t i = 0;
+  synthetic->PushMemberValue([&](Ref<sym::Value> value) {
+    // we want everyone
+    JS_SetPropertyUint32(cx, array, i, JsVariable::CreateValue(cx, std::move(value)));
+    ++i;
+    return true;
+  });
+
+  return array;
 }
 
 void
