@@ -166,7 +166,7 @@ concept Serializable =
 
 // When the arg is not a primitive but has a .value() method that gives a primitive.
 template <typename T>
-constexpr decltype(auto)
+constexpr auto &
 UnwrapValue(const T &value) noexcept
 {
   if constexpr (HasValueMethod<T> && !DirectlySerializable<T>) {
@@ -201,7 +201,6 @@ GetArgType() noexcept
   } else {
     static_assert(sizeof(T) == 0, "Unsupported argument type for binary logging");
   }
-  return static_cast<ArgType>(42);
 }
 
 } // namespace binlog

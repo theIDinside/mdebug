@@ -303,6 +303,10 @@ public:
   static void ConfigureLogging(const mdb::cfg::InitializationConfiguration &config) noexcept;
 
 private:
+#if defined(MDB_BINARY_LOGGING)
+  std::unique_ptr<DebuggerThread> mLogFlusherThread;
+#endif
+
   std::array<LogChannel *, Enum<Channel>::Count()> LogChannels{};
 };
 
@@ -319,11 +323,13 @@ LogChannel *GetLogChannel(Channel id) noexcept;
 // When binary logging is enabled, redirect all log macros to BINLOG
 #define DBGLOG BINLOG
 #define DBGBUFLOG BINLOG
-#define CDLOG(condition, channel, ...) \
-  if ((condition)) { BINLOG(channel, __VA_ARGS__); }
+#define CDLOG(condition, channel, ...)                                                                            \
+  if ((condition)) {                                                                                              \
+    BINLOG(channel, __VA_ARGS__);                                                                                 \
+  }
 #define DBGLOG_STR(channel, str) BINLOG(channel, "{}", str)
 
-#else  // Text logging (original implementation)
+#else // Text logging (original implementation)
 
 #if defined(MDB_DEBUG) and MDB_DEBUG == 1
 
@@ -373,7 +379,7 @@ LogChannel *GetLogChannel(Channel id) noexcept;
   }
 #endif
 
-#endif  // MDB_BINARY_LOGGING
+#endif // MDB_BINARY_LOGGING
 
 using PEArg = mdb::logging::ProfileEventArg;
 

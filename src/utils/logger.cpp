@@ -230,6 +230,14 @@ Logger::ConfigureLogging(const mdb::cfg::InitializationConfiguration &config) no
 #if defined(MDB_BINARY_LOGGING)
   // Configure binary logging
   logging::InitializeBinaryLogging(config);
+  sLoggerInstance->mLogFlusherThread =
+    DebuggerThread::SpawnDebuggerThread("BinLogger", [](std::string_view, std::stop_token &token) {
+      auto logger = mdb::logging::GetBinaryLogger();
+      while (!token.stop_requested()) {
+        logger->MainWaitFlushOnce(token);
+      }
+      mdb::logging::ShutdownBinaryLogging();
+    });
 #else
   // Configure text logging
   DBGLOG(core, "channels set: {}", channels.size());

@@ -308,10 +308,10 @@ protected:
 
 TEST_F(BinaryLoggerTest, CreateAndShutdown)
 {
-  BinaryLogger::Config config{ .logFilePath = testLogPath };
+  BinaryLoggerConfig config{ .logFilePath = testLogPath };
 
   {
-    BinaryLogger logger(config);
+    BinaryLogger<4> logger(config);
     logger.Shutdown();
   }
 
@@ -321,10 +321,10 @@ TEST_F(BinaryLoggerTest, CreateAndShutdown)
 
 TEST_F(BinaryLoggerTest, LogSingleMessage)
 {
-  BinaryLogger::Config config{ .logFilePath = testLogPath };
+  BinaryLoggerConfig config{ .logFilePath = testLogPath };
 
   {
-    BinaryLogger logger(config);
+    BinaryLogger<4> logger(config);
     logger.Log(0, 1, std::source_location::current(), 42, "test");
     logger.Shutdown();
   }
@@ -337,10 +337,10 @@ TEST_F(BinaryLoggerTest, LogSingleMessage)
 
 TEST_F(BinaryLoggerTest, LogMultipleMessages)
 {
-  BinaryLogger::Config config{ .logFilePath = testLogPath };
+  BinaryLoggerConfig config{ .logFilePath = testLogPath };
 
   {
-    BinaryLogger logger(config);
+    BinaryLogger<4> logger(config);
 
     for (int i = 0; i < 100; ++i) {
       logger.Log(0, 1, std::source_location::current(), i, "message", 3.14);
@@ -357,10 +357,10 @@ TEST_F(BinaryLoggerTest, LogMultipleMessages)
 
 TEST_F(BinaryLoggerTest, ThreadLocalBufferFlush)
 {
-  BinaryLogger::Config config{ .logFilePath = testLogPath };
+  BinaryLoggerConfig config{ .logFilePath = testLogPath };
 
   {
-    BinaryLogger logger(config);
+    BinaryLogger<4> logger(config);
 
     // Log many messages to trigger flush
     for (int i = 0; i < 1000; ++i) {

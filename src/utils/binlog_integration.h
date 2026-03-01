@@ -11,11 +11,13 @@
 
 namespace mdb::logging {
 
+using BinaryLogger = binlog::BinaryLogger<8>;
+
 /**
  * Global binary logger instance for MDB.
  * Initialized by ConfigureLogging().
  */
-inline std::unique_ptr<binlog::BinaryLogger> gBinaryLogger = nullptr;
+inline std::unique_ptr<BinaryLogger> gBinaryLogger = nullptr;
 
 /**
  * Initialize binary logging for MDB.
@@ -24,15 +26,15 @@ inline std::unique_ptr<binlog::BinaryLogger> gBinaryLogger = nullptr;
 inline void
 InitializeBinaryLogging(const cfg::InitializationConfiguration &config)
 {
-  binlog::BinaryLogger::Config binlogConfig{ .logFilePath = config.mLogDirectory / "mdb.binlog" };
+  binlog::BinaryLoggerConfig binlogConfig{ .logFilePath = config.mLogDirectory / "mdb.binlog" };
 
-  gBinaryLogger = std::make_unique<binlog::BinaryLogger>(binlogConfig);
+  gBinaryLogger = std::make_unique<BinaryLogger>(binlogConfig);
 }
 
 /**
  * Get the binary logger instance.
  */
-inline binlog::BinaryLogger *
+inline BinaryLogger *
 GetBinaryLogger() noexcept
 {
   return gBinaryLogger.get();
