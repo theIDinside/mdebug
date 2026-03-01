@@ -1025,7 +1025,7 @@ SupervisorState::RegisterSymbolFile(std::shared_ptr<SymbolFile> symbolFile, bool
       (*it)->HighProgramCounter(),
       symbolFile->LowProgramCounter(),
       symbolFile->HighProgramCounter(),
-      same_bounds)
+      same_bounds);
     return;
   }
   mSymbolFiles.emplace_back(symbolFile);
@@ -1427,6 +1427,7 @@ SupervisorState::InstallSoftwareBreakpointLocation(Tid tid, AddrPtr addr) noexce
 void
 SupervisorState::ShutDownDebugAdapterClient() noexcept
 {
+  DBGLOG(core, "Shutdown adapter client for {}", mTaskLeader);
   if (mDebugAdapterClient) {
     mDebugAdapterClient->PostDapEvent(new ui::dap::TerminatedEvent{
       mTaskLeader,

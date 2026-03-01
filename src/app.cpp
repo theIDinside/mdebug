@@ -85,7 +85,7 @@ Start(int argc, const char **argv, [[maybe_unused]] const char **envp)
 
   DBGLOG(core, "MDB CLI Arguments");
   for (const auto arg : std::span{ argv, argv + argc }.subspan(1)) {
-    DBGLOG(core, "{}", arg);
+    DBGLOG(core, "{}", std::string_view{ arg });
   }
 
   Tracer::Create();

@@ -739,8 +739,10 @@ Session::HandleEvent(TaskInfo &task, StopStatus stopStatus) noexcept
     if (stopStatus.mIsTerminatingEvent) {
       // TODO: Allow signals through / stop process / etc. Allow for configurability here.
       DBGLOG(core, "Terminated by signal: {}", stopStatus.uSignal);
-      mDebugAdapterClient->PostDapEvent(new ui::dap::ExitedEvent{ mTaskLeader, stopStatus.uSignal });
-      ShutDownDebugAdapterClient();
+      if (mDebugAdapterClient) {
+        mDebugAdapterClient->PostDapEvent(new ui::dap::ExitedEvent{ mTaskLeader, stopStatus.uSignal });
+        ShutDownDebugAdapterClient();
+      }
       mIsExited = true;
     } else {
       task.SetSignalToForward(stopStatus.uSignal);

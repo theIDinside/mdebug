@@ -225,7 +225,7 @@ UnitData::ClearLoadedCache() noexcept
   mFullyLoaded = false;
   std::lock_guard lock(mLoadDiesMutex);
   if (!mDieCollection.empty()) {
-    DBGLOG(dwarf, "{} clearing dies", SectionOffset())
+    DBGLOG(dwarf, "{} clearing dies", SectionOffset());
     mDieCollection.clear();
     // actually release the memory. Otherwise, what's the point?
     mDieCollection.shrink_to_fit();
